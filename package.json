@@ -1,0 +1,53 @@
+{
+  "name": "cssgraph",
+  "version": "0.1.0",
+  "description": "CSS intelligence for AI coding agents — surgical style context, fewer tool calls, faster answers. 100% local.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "cssgraph": "./dist/bin/cssgraph.js"
+  },
+  "files": [
+    "dist",
+    "scripts",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc && npm run copy-assets && node -e \"require('fs').chmodSync('dist/bin/cssgraph.js', 0o755)\"",
+    "copy-assets": "node -e \"const fs=require('fs');fs.mkdirSync('dist/db',{recursive:true});fs.copyFileSync('src/db/schema.sql','dist/db/schema.sql')\"",
+    "dev": "tsc --watch",
+    "cli": "npm run build && node dist/bin/cssgraph.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "clean": "node -e \"const fs=require('fs');fs.rmSync('dist',{recursive:true,force:true})\""
+  },
+  "keywords": [
+    "css",
+    "scss",
+    "less",
+    "knowledge-graph",
+    "code-intelligence",
+    "mcp"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "commander": "^14.0.2",
+    "ignore": "^7.0.5",
+    "picomatch": "^4.0.3",
+    "postcss": "^8.5.16",
+    "postcss-less": "^6.0.0",
+    "postcss-scss": "^4.0.9",
+    "postcss-selector-parser": "^7.1.4",
+    "web-tree-sitter": "^0.25.3"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.0",
+    "@types/node": "^20.19.30",
+    "typescript": "^5.0.0",
+    "vitest": "^2.1.9"
+  },
+  "engines": {
+    "node": ">=22.5.0 <25.0.0"
+  }
+}
