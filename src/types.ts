@@ -20,6 +20,8 @@ export const LANGUAGES = [
   'css',
   'scss',
   'less',
+  'sass',
+  'pcss',
   'unknown',
 ] as const;
 
@@ -137,6 +139,36 @@ export interface SearchOptions {
 export interface SearchResult {
   node: Node;
   score: number;
+}
+
+export interface PropertySearchOptions {
+  property?: string;
+  value: string;
+  exact?: boolean;
+  limit?: number;
+}
+
+export interface PropertySearchResult {
+  node: Node;
+  selectorNode?: Node;
+}
+
+export interface CascadeStep {
+  node: Node;
+  specificity?: [number, number, number, number];
+  properties: Array<{ property: string; value: string }>;
+  overrides: Node[];
+  overriddenBy: Node[];
+}
+
+export interface CascadeResult {
+  className: string;
+  steps: CascadeStep[];
+}
+
+export interface UnusedResult {
+  node: Node;
+  referencedBy: number;
 }
 
 export interface Context {

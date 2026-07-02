@@ -1,4 +1,5 @@
 import * as readline from 'readline';
+import { SERVER_INSTRUCTIONS } from './server-instructions';
 
 export class MCPServer {
   private rl: readline.Interface | null = null;
@@ -184,6 +185,63 @@ export class MCPServer {
           cg.destroy();
         }
       }
+      case 'cssgraph_unused': {
+        const { default: CodeGraph } = await import('../index');
+        const root = CodeGraph.isInitialized(cwd) ? cwd : (await this.findRoot(cwd));
+        if (!root) return 'cssgraph is not initialized.';
+        const cg = await CodeGraph.open(root);
+        try {
+          const limit = Math.min((args['limit'] as number) ?? 50, 200);
+          const results = cg.findUnusedClassSelectors().slice(0, limit);
+          if (results.length === 0) return 'No unused class selectors found.';
+          return results.map(r => `${r.node.name} (${r.node.filePath}:${r.node.startLine})`).join('\n');
+        } finally {
+          cg.destroy();
+        }
+      }
+      case 'cssgraph_cascade': {
+        const className = args['className'] as string || '';
+        const { default: CodeGraph } = await import('../index');
+        const root = CodeGraph.isInitialized(cwd) ? cwd : (await this.findRoot(cwd));
+        if (!root) return 'cssgraph is not initialized.';
+        const cg = await CodeGraph.open(root);
+        try {
+          const result = cg.getCascade(className);
+          if (result.steps.length === 0) return `No cascade data found for "${className}".`;
+          const lines: string[] = [`Cascade path for "${className}":`];
+          for (let i = 0; i < result.steps.length; i++) {
+            const s = result.steps[i]!;
+            const spec = s.specificity ? `[${s.specificity.join(', ')}]` : '';
+            lines.push(`${i + 1}. ${s.node.selector ?? s.node.name} ${spec} (${s.node.filePath}:${s.node.startLine})`);
+            if (s.properties.length > 0) {
+              lines.push(`   ${s.properties.map(p => `${p.property}: ${p.value}`).join('; ')}`);
+            }
+          }
+          return lines.join('\n');
+        } finally {
+          cg.destroy();
+        }
+      }
+      case 'cssgraph_property': {
+        const property = args['property'] as string | undefined;
+        const value = args['value'] as string || '';
+        const { default: CodeGraph } = await import('../index');
+        const root = CodeGraph.isInitialized(cwd) ? cwd : (await this.findRoot(cwd));
+        if (!root) return 'cssgraph is not initialized.';
+        const cg = await CodeGraph.open(root);
+        try {
+          const limit = Math.min((args['limit'] as number) ?? 50, 200);
+          const exact = (args['exact'] as boolean) ?? false;
+          const results = cg.searchByPropertyValue({ property, value, exact, limit });
+          if (results.length === 0) return `No results found for property value "${value}".`;
+          return results.map(r => {
+            const selector = r.selectorNode?.selector ?? r.selectorNode?.name ?? '—';
+            return `${selector} — ${r.node.name}: ${r.node.value} (${r.node.filePath}:${r.node.startLine})`;
+          }).join('\n');
+        } finally {
+          cg.destroy();
+        }
+      }
       default:
         return `Unknown tool: ${name}`;
     }
@@ -199,7 +257,7 @@ export class MCPServer {
   }
 
   private getInstructions(): string {
-    return 'cssgraph provides CSS intelligence for AI agents. Use cssgraph_explore to get the full style context for any className in one call.';
+    return SERVER_INSTRUCTIONS;
   }
 
   private getToolDefinitions() {
@@ -263,6 +321,41 @@ export class MCPServer {
         inputSchema: {
           type: 'object',
           properties: {},
+        },
+      },
+      {
+        name: 'cssgraph_unused',
+        description: 'Find CSS class selectors that have no incoming references.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            limit: { type: 'number', description: 'Maximum results (default: 50, max: 200)' },
+          },
+        },
+      },
+      {
+        name: 'cssgraph_cascade',
+        description: 'Visualize the cascade path for a className, ordered by specificity.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            className: { type: 'string', description: 'Class name to analyze' },
+          },
+          required: ['className'],
+        },
+      },
+      {
+        name: 'cssgraph_property',
+        description: 'Search selectors by CSS property value (e.g. property="display", value="flex").',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            property: { type: 'string', description: 'CSS property name (optional)' },
+            value: { type: 'string', description: 'Property value to search for' },
+            exact: { type: 'boolean', description: 'Exact value match' },
+            limit: { type: 'number', description: 'Maximum results (default: 50, max: 200)' },
+          },
+          required: ['value'],
         },
       },
     ];

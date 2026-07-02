@@ -91,6 +91,19 @@ export function extractFromSource(filePath: string, source: string): ExtractionR
         root = postcss().process(source, { from: filePath, syntax: lessSyntax }).root;
         break;
       }
+      case 'sass':
+        try {
+          const sass = require('sass');
+          const result = sass.compileString(source, {
+            syntax: 'indented',
+            url: new URL(`file://${filePath}`),
+          });
+          root = postcss.parse(result.css, { from: filePath });
+        } catch { /* sass not installed or parse error */ }
+        break;
+      case 'pcss':
+        root = postcss.parse(source, { from: filePath });
+        break;
       default:
         root = postcss.parse(source, { from: filePath });
     }

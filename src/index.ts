@@ -2,12 +2,13 @@ import * as path from 'path';
 import {
   Node, Edge, FileRecord, Subgraph, TraversalOptions,
   SearchOptions, SearchResult, GraphStats, IndexProgress, IndexResult, SyncResult,
+  UnusedResult, CascadeResult, PropertySearchOptions, PropertySearchResult,
 } from './types';
 import { DatabaseConnection, getDatabasePath } from './db';
 import { QueryBuilder } from './db/queries';
 import { isInitialized, createDirectory, removeDirectory, validateDirectory, getCodeGraphDir } from './directory';
 import { initGrammars, detectLanguage, isLanguageSupported } from './extraction/grammars';
-import { GraphTraverser } from './graph';
+import { GraphTraverser, GraphQueryManager } from './graph';
 import { extractFromSource } from './extraction/postcss-extractor';
 import { createContextBuilder, ContextBuilder } from './context';
 import { Mutex, FileLock } from './utils';
@@ -45,6 +46,7 @@ export class CodeGraph {
   private queries: QueryBuilder;
   private projectRoot: string;
   private traverser: GraphTraverser;
+  private graphQueries: GraphQueryManager;
   private contextBuilder: ContextBuilder;
   private indexMutex = new Mutex();
   private fileLock: FileLock;
@@ -61,6 +63,7 @@ export class CodeGraph {
     } catch { /* best-effort */ }
 
     this.traverser = new GraphTraverser(queries);
+    this.graphQueries = new GraphQueryManager(queries);
     this.contextBuilder = createContextBuilder(this.projectRoot, this.queries, this.traverser);
   }
 
@@ -459,6 +462,18 @@ export class CodeGraph {
 
   getChildren(nodeId: string): Node[] {
     return this.traverser.getChildren(nodeId);
+  }
+
+  findUnusedClassSelectors(): UnusedResult[] {
+    return this.graphQueries.findUnusedClassSelectors();
+  }
+
+  getCascade(className: string): CascadeResult {
+    return this.graphQueries.getCascade(className);
+  }
+
+  searchByPropertyValue(options: PropertySearchOptions): PropertySearchResult[] {
+    return this.graphQueries.searchByPropertyValue(options);
   }
 
   // ===========================================================================

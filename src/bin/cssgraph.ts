@@ -405,11 +405,204 @@ program
     }
   });
 
-/**
- * codegraph files
- */
-program
-  .command('files')
+  /**
+   * cssgraph unused
+   */
+  program
+    .command('unused')
+    .description('Find class selectors with no incoming references')
+    .option('-p, --path <path>', 'Project path')
+    .option('-l, --limit <number>', 'Maximum results', '50')
+    .option('-j, --json', 'Output as JSON')
+    .action(async (options: { path?: string; limit?: string; json?: boolean }) => {
+      const projectPath = resolveProjectPath(options.path);
+
+      if (!isInitialized(projectPath)) {
+        console.error(`Not initialized in ${projectPath}. Run "cssgraph init" first.`);
+        process.exit(1);
+      }
+
+      try {
+        const { default: CodeGraph } = await import('../index');
+        const cg = await CodeGraph.open(projectPath);
+        const limit = parseInt(options.limit || '50', 10);
+        const results = cg.findUnusedClassSelectors().slice(0, limit);
+
+        if (options.json) {
+          console.log(JSON.stringify(results.map(r => ({
+            name: r.node.name,
+            selector: r.node.selector,
+            filePath: r.node.filePath,
+            line: r.node.startLine,
+            referencedBy: r.referencedBy,
+          })), null, 2));
+        } else {
+          if (results.length === 0) {
+            console.log('No unused class selectors found.');
+          } else {
+            console.log(`\n${bold('Unused class selectors')}: ${results.length} found\n`);
+            for (const r of results) {
+              console.log(`  ${r.node.name.padEnd(24)} ${dim(r.node.filePath)}:${r.node.startLine}`);
+              if (r.node.selector) console.log(`    ${dim('selector:')} ${r.node.selector}`);
+            }
+          }
+        }
+
+        cg.destroy();
+      } catch (err) {
+        console.error(`unused failed: ${err instanceof Error ? err.message : String(err)}`);
+        process.exit(1);
+      }
+    });
+
+  /**
+   * cssgraph cascade <className>
+   */
+  program
+    .command('cascade <className>')
+    .description('Visualize the cascade path for a className')
+    .option('-p, --path <path>', 'Project path')
+    .option('-j, --json', 'Output as JSON')
+    .action(async (className: string, options: { path?: string; json?: boolean }) => {
+      const projectPath = resolveProjectPath(options.path);
+
+      if (!isInitialized(projectPath)) {
+        console.error(`Not initialized in ${projectPath}. Run "cssgraph init" first.`);
+        process.exit(1);
+      }
+
+      try {
+        const { default: CodeGraph } = await import('../index');
+        const cg = await CodeGraph.open(projectPath);
+        const result = cg.getCascade(className);
+
+        if (options.json) {
+          console.log(JSON.stringify({
+            className: result.className,
+            steps: result.steps.map(s => ({
+              selector: s.node.selector,
+              filePath: s.node.filePath,
+              line: s.node.startLine,
+              specificity: s.specificity,
+              properties: s.properties,
+              overrides: s.overrides.map(o => o.selector),
+              overriddenBy: s.overriddenBy.map(o => o.selector),
+            })),
+          }, null, 2));
+        } else {
+          if (result.steps.length === 0) {
+            console.log(`No cascade data found for "${className}"`);
+          } else {
+            console.log(`\n${bold('Cascade path')} for "${className}":\n`);
+            for (let i = 0; i < result.steps.length; i++) {
+              const s = result.steps[i]!;
+              const spec = s.specificity ? `[${s.specificity.join(', ')}]` : '[0, 0, 0, 0]';
+              console.log(`  ${(i + 1).toString().padStart(2)}. ${s.node.selector ?? s.node.name} ${dim(spec)}`);
+              console.log(`      ${dim(s.node.filePath)}:${s.node.startLine}`);
+              if (s.properties.length > 0) {
+                const props = s.properties.map(p => `${p.property}: ${p.value}`).join('; ');
+                console.log(`      ${props}`);
+              }
+              if (s.overrides.length > 0) {
+                console.log(`      ${dim('overrides:')} ${s.overrides.map(o => o.selector).join(', ')}`);
+              }
+              if (s.overriddenBy.length > 0) {
+                console.log(`      ${dim('overridden by:')} ${s.overriddenBy.map(o => o.selector).join(', ')}`);
+              }
+            }
+          }
+        }
+
+        cg.destroy();
+      } catch (err) {
+        console.error(`cascade failed: ${err instanceof Error ? err.message : String(err)}`);
+        process.exit(1);
+      }
+    });
+
+  /**
+   * cssgraph property <property> [value]
+   */
+  program
+    .command('property <query...>')
+    .description('Search selectors by CSS property value (e.g. "display:flex" or "display flex")')
+    .option('-p, --path <path>', 'Project path')
+    .option('-e, --exact', 'Exact value match', false)
+    .option('-l, --limit <number>', 'Maximum results', '50')
+    .option('-j, --json', 'Output as JSON')
+    .action(async (queryParts: string[], options: { path?: string; exact?: boolean; limit?: string; json?: boolean }) => {
+      const projectPath = resolveProjectPath(options.path);
+
+      if (!isInitialized(projectPath)) {
+        console.error(`Not initialized in ${projectPath}. Run "cssgraph init" first.`);
+        process.exit(1);
+      }
+
+      const raw = queryParts.join(' ');
+      let property: string | undefined;
+      let value: string;
+
+      if (raw.includes(':')) {
+        const idx = raw.indexOf(':');
+        property = raw.slice(0, idx).trim();
+        value = raw.slice(idx + 1).trim();
+      } else {
+        const parts = raw.split(/\s+/);
+        if (parts.length >= 2) {
+          property = parts[0];
+          value = parts.slice(1).join(' ');
+        } else {
+          value = raw;
+        }
+      }
+
+      if (!value) {
+        console.error('Please provide a property value to search for.');
+        process.exit(1);
+      }
+
+      try {
+        const { default: CodeGraph } = await import('../index');
+        const cg = await CodeGraph.open(projectPath);
+        const limit = parseInt(options.limit || '50', 10);
+        const results = cg.searchByPropertyValue({ property, value, exact: options.exact, limit });
+
+        if (options.json) {
+          console.log(JSON.stringify(results.map(r => ({
+            property: r.node.name,
+            value: r.node.value,
+            selector: r.selectorNode?.selector ?? r.node.selector,
+            className: r.selectorNode?.name,
+            filePath: r.node.filePath,
+            line: r.node.startLine,
+          })), null, 2));
+        } else {
+          if (results.length === 0) {
+            console.log(`No results found for property value "${raw}"`);
+          } else {
+            console.log(`\n${bold('Property matches')} for "${raw}": ${results.length}\n`);
+            for (const r of results) {
+              const selector = r.selectorNode?.selector ?? r.node.selector ?? r.selectorNode?.name ?? '—';
+              const className = r.selectorNode?.name ? `.${r.selectorNode.name}` : '';
+              console.log(`  ${selector}${className ? ` ${dim(className)}` : ''}`);
+              console.log(`    ${r.node.name}: ${r.node.value}`);
+              console.log(`    ${dim(r.node.filePath)}:${r.node.startLine}`);
+            }
+          }
+        }
+
+        cg.destroy();
+      } catch (err) {
+        console.error(`property search failed: ${err instanceof Error ? err.message : String(err)}`);
+        process.exit(1);
+      }
+    });
+
+  /**
+   * codegraph files
+   */
+  program
+    .command('files')
   .description('Show project style file structure')
   .option('-p, --path <path>', 'Project path')
   .option('--format <format>', 'Output format (tree, flat)', 'tree')

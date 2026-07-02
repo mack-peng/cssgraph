@@ -33,13 +33,21 @@ export class DatabaseConnection {
     const schemaPath = path.join(__dirname, 'schema.sql');
     const schemaSql = fs.readFileSync(schemaPath, 'utf-8');
     db.exec(schemaSql);
+    this.ensureRuntimeIndexes(db);
 
     return new DatabaseConnection(db, dbPath);
   }
 
   static open(dbPath: string): DatabaseConnection {
     const db = new DatabaseSync(dbPath);
+    this.ensureRuntimeIndexes(db);
     return new DatabaseConnection(db, dbPath);
+  }
+
+  private static ensureRuntimeIndexes(db: DatabaseSync): void {
+    try {
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_nodes_value ON nodes(value)`);
+    } catch { /* best effort */ }
   }
 
   private enableWAL(): void {

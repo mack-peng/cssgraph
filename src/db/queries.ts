@@ -1,5 +1,5 @@
 import { DatabaseSync, StatementSync } from 'node:sqlite';
-import { Node, Edge, FileRecord, SearchResult, SearchOptions, NodeKind, EdgeKind, Language, GraphStats } from '../types';
+import { Node, Edge, FileRecord, SearchResult, SearchOptions, NodeKind, EdgeKind, Language, GraphStats, PropertySearchOptions, PropertySearchResult, UnusedResult } from '../types';
 import * as crypto from 'crypto';
 
 function hashId(qualifiedName: string): string {
@@ -12,6 +12,10 @@ export class QueryBuilder {
   private insertNodeStmt: StatementSync;
   private insertEdgeStmt: StatementSync;
   private insertFileStmt: StatementSync;
+  private classSelectorsWithoutRefsStmt: StatementSync;
+  private classSelectorsByNameStmt: StatementSync;
+  private propertiesByValueStmt: StatementSync;
+  private propertiesByPropertyValueStmt: StatementSync;
 
   constructor(db: DatabaseSync) {
     this.db = db;
@@ -28,6 +32,32 @@ export class QueryBuilder {
     this.insertFileStmt = db.prepare(`
       INSERT OR REPLACE INTO files (path, content_hash, language, size, modified_at, indexed_at, node_count, errors)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    this.classSelectorsWithoutRefsStmt = db.prepare(`
+      SELECT n.* FROM nodes n
+      WHERE n.kind = 'class_selector'
+        AND NOT EXISTS (
+          SELECT 1 FROM edges e
+          WHERE e.target = n.id AND e.kind = 'references'
+        )
+      ORDER BY n.file_path, n.start_line
+    `);
+    this.classSelectorsByNameStmt = db.prepare(`
+      SELECT * FROM nodes
+      WHERE kind = 'class_selector' AND lower(name) = lower(?)
+      ORDER BY file_path, start_line
+    `);
+    this.propertiesByValueStmt = db.prepare(`
+      SELECT n.* FROM nodes n
+      WHERE n.kind = 'css_property' AND n.value LIKE ?
+      ORDER BY n.file_path, n.start_line
+      LIMIT ?
+    `);
+    this.propertiesByPropertyValueStmt = db.prepare(`
+      SELECT n.* FROM nodes n
+      WHERE n.kind = 'css_property' AND lower(n.name) = lower(?) AND n.value LIKE ?
+      ORDER BY n.file_path, n.start_line
+      LIMIT ?
     `);
   }
 
@@ -133,6 +163,35 @@ export class QueryBuilder {
   deleteNodesByFile(filePath: string): number {
     const result = this.db.prepare('DELETE FROM nodes WHERE file_path = ?').run(filePath);
     return result.changes;
+  }
+
+  getClassSelectorsWithoutReferenceEdges(): UnusedResult[] {
+    const rows = this.classSelectorsWithoutRefsStmt.all() as Record<string, unknown>[];
+    return rows.map(r => ({
+      node: this.rowToNode(r),
+      referencedBy: 0,
+    }));
+  }
+
+  getClassSelectorsByName(name: string): Node[] {
+    const rows = this.classSelectorsByNameStmt.all(name) as Record<string, unknown>[];
+    return rows.map(r => this.rowToNode(r));
+  }
+
+  searchNodesByPropertyValue(options: PropertySearchOptions): PropertySearchResult[] {
+    const limit = options.limit ?? 50;
+    const valuePattern = options.exact ? options.value : `%${options.value}%`;
+
+    let rows: Record<string, unknown>[];
+    if (options.property) {
+      rows = this.propertiesByPropertyValueStmt.all(options.property, valuePattern, limit) as Record<string, unknown>[];
+    } else {
+      rows = this.propertiesByValueStmt.all(valuePattern, limit) as Record<string, unknown>[];
+    }
+
+    return rows.map(r => ({
+      node: this.rowToNode(r),
+    }));
   }
 
   // ===========================================================================

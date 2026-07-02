@@ -3,9 +3,11 @@ import { Language } from '../types';
 export function detectLanguage(filePath: string): Language {
   const ext = filePath.split('.').pop()?.toLowerCase();
   switch (ext) {
-    case 'css': return filePath.includes('.module.') ? 'css' : 'css';
+    case 'css': return 'css';
     case 'scss': return 'scss';
     case 'less': return 'less';
+    case 'sass': return 'sass';
+    case 'pcss': return 'pcss';
     default: return 'unknown';
   }
 }
@@ -16,7 +18,7 @@ export function isSourceFile(filePath: string): boolean {
 }
 
 export function isLanguageSupported(lang: Language): boolean {
-  return lang === 'css' || lang === 'scss' || lang === 'less';
+  return lang === 'css' || lang === 'scss' || lang === 'less' || lang === 'sass' || lang === 'pcss';
 }
 
 export function isFileLevelOnlyLanguage(_lang: Language): boolean {
