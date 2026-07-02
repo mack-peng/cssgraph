@@ -453,13 +453,54 @@ program
   });
 
 /**
- * codegraph version
+ * cssgraph version
  */
 program
   .command('version')
   .description('Print the installed version')
   .action(() => {
     console.log(packageJson.version);
+  });
+
+/**
+ * cssgraph install
+ */
+program
+  .command('install')
+  .description('Wire up cssgraph MCP server to your AI agents')
+  .option('--target <ids>', 'Agent targets (auto, all, or csv: claude,opencode)')
+  .option('--location <loc>', 'Config location (global, local)', 'global')
+  .option('--yes', 'Skip prompts and accept defaults')
+  .option('--no-auto-allow', 'Skip Claude Code auto-allow permissions')
+  .action(async (options: { target?: string; location?: string; yes?: boolean; autoAllow?: boolean }) => {
+    try {
+      const { runInstallerWithOptions } = await import('../installer');
+      await runInstallerWithOptions({
+        target: options.target,
+        location: options.location as 'global' | 'local',
+        autoAllow: options.autoAllow,
+        yes: options.yes,
+      });
+    } catch (err) {
+      console.error(`Install failed: ${err instanceof Error ? err.message : String(err)}`);
+      process.exit(1);
+    }
+  });
+
+/**
+ * cssgraph uninstall
+ */
+program
+  .command('uninstall')
+  .description('Remove cssgraph from your AI agents')
+  .action(async () => {
+    try {
+      const { runUninstaller } = await import('../installer');
+      await runUninstaller();
+    } catch (err) {
+      console.error(`Uninstall failed: ${err instanceof Error ? err.message : String(err)}`);
+      process.exit(1);
+    }
   });
 
 // Check if running with no arguments - show help
