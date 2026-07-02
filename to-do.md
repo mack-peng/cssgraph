@@ -8,9 +8,9 @@
 
 ## Tailwind v4 兼容
 
-- [ ] 解析 CSS-based config 中的 `@theme` 块
-- [ ] 提取 `@theme { --color-primary: #000; }` 作为 utility 映射来源
-- [ ] 与 v3 JS config 保持同一套 utility 解析输出格式
+- [x] 解析 CSS-based config 中的 `@theme` 块
+- [x] 提取 `@theme { --color-primary: #000; }` 作为 utility 映射来源
+- [x] 与 v3 JS config 保持同一套 utility 解析输出格式
 
 ## styled-components / CSS-in-JS
 

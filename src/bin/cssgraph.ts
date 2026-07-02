@@ -39,7 +39,8 @@ program
   .command('init [path]')
   .description('Initialize cssgraph in a project directory and build the initial index')
   .option('-f, --force', 'Initialize even if path looks like home directory or filesystem root')
-  .action(async (pathArg: string | undefined, options: { force?: boolean }) => {
+  .option('--jsx', 'Also scan .jsx/.tsx files for CSS-in-JS and className references')
+  .action(async (pathArg: string | undefined, options: { force?: boolean; jsx?: boolean }) => {
     const projectPath = path.resolve(pathArg || process.cwd());
 
     if (!options.force) {
@@ -69,6 +70,7 @@ program
       let lastPhase = '';
 
       const result = await cg.indexAll({
+        jsx: options.jsx,
         onProgress: (progress) => {
           if (progress.phase !== lastPhase) {
             if (lastPhase) progressClear();
@@ -139,7 +141,8 @@ program
   .description('Rebuild the full index from scratch')
   .option('-f, --force', 'Index even if path looks like home directory')
   .option('-q, --quiet', 'Suppress progress output')
-  .action(async (pathArg: string | undefined, options: { force?: boolean; quiet?: boolean }) => {
+  .option('--jsx', 'Also scan .jsx/.tsx files for CSS-in-JS and className references')
+  .action(async (pathArg: string | undefined, options: { force?: boolean; quiet?: boolean; jsx?: boolean }) => {
     const projectPath = resolveProjectPath(pathArg);
 
     if (!options.force) {
@@ -166,6 +169,7 @@ program
       let lastPhase = '';
 
       const result = await cg.indexAll({
+        jsx: options.jsx,
         onProgress: options.quiet ? undefined : (progress) => {
           if (progress.phase !== lastPhase) {
             if (lastPhase) progressClear();
@@ -660,7 +664,8 @@ program
   .command('sync [path]')
   .description('Sync changes since last index')
   .option('-q, --quiet', 'Suppress output')
-  .action(async (pathArg: string | undefined, options: { quiet?: boolean }) => {
+  .option('--jsx', 'Also scan .jsx/.tsx files for CSS-in-JS and className references')
+  .action(async (pathArg: string | undefined, options: { quiet?: boolean; jsx?: boolean }) => {
     const projectPath = resolveProjectPath(pathArg);
 
     if (!isInitialized(projectPath)) {
@@ -671,7 +676,7 @@ program
     try {
       const { default: CodeGraph } = await import('../index');
       const cg = await CodeGraph.open(projectPath);
-      const result = await cg.sync();
+      const result = await cg.sync({ jsx: options.jsx });
 
       if (!options.quiet) {
         const total = result.filesAdded + result.filesModified + result.filesRemoved;

@@ -4,6 +4,8 @@ export const NODE_KINDS = [
   'css_property',
   'css_variable',
   'at_rule',
+  'styled_component',
+  'jsx_component',
 ] as const;
 
 export type NodeKind = (typeof NODE_KINDS)[number];
@@ -22,6 +24,8 @@ export const LANGUAGES = [
   'less',
   'sass',
   'pcss',
+  'jsx',
+  'tsx',
   'unknown',
 ] as const;
 

@@ -7,9 +7,11 @@ import {
 import { DatabaseConnection, getDatabasePath } from './db';
 import { QueryBuilder } from './db/queries';
 import { isInitialized, createDirectory, removeDirectory, validateDirectory, getCodeGraphDir } from './directory';
-import { initGrammars, detectLanguage, isLanguageSupported } from './extraction/grammars';
+import { initGrammars, detectLanguage, isLanguageSupported, isJSXFile } from './extraction/grammars';
 import { GraphTraverser, GraphQueryManager } from './graph';
 import { extractFromSource } from './extraction/postcss-extractor';
+import { extractCSSInJS } from './extraction/css-in-js-extractor';
+import { extractClassNameUsage } from './extraction/jsx-classname-extractor';
 import { createContextBuilder, ContextBuilder } from './context';
 import { Mutex, FileLock } from './utils';
 import { FileWatcher, WatchOptions, PendingFile, LockUnavailableError } from './sync';
@@ -39,6 +41,7 @@ export interface IndexOptions {
   onProgress?: (progress: IndexProgress) => void;
   signal?: AbortSignal;
   verbose?: boolean;
+  jsx?: boolean;
 }
 
 export class CodeGraph {
@@ -214,10 +217,15 @@ export class CodeGraph {
       return results;
     };
 
-    const styleFiles = scanFiles(this.projectRoot);
+    const allFiles = scanFiles(this.projectRoot);
+    const styleFiles = allFiles.filter(f => !isJSXFile(f));
+    const jsxFiles = options.jsx ? allFiles.filter(f => isJSXFile(f)) : [];
+
+    // Ensure style files are indexed before JSX files so class selectors exist for references.
+    const orderedFiles = [...styleFiles, ...jsxFiles];
 
     if (options.onProgress) {
-      options.onProgress({ phase: 'scanning', current: styleFiles.length, total: styleFiles.length });
+      options.onProgress({ phase: 'scanning', current: orderedFiles.length, total: orderedFiles.length });
     }
 
     let filesIndexed = 0;
@@ -227,18 +235,60 @@ export class CodeGraph {
     let totalEdges = 0;
     const allErrors: import('./types').ExtractionError[] = [];
 
-    for (let i = 0; i < styleFiles.length; i++) {
-      const filePath = styleFiles[i]!;
+    // Build a name -> class selector node ids map once we reach JSX files.
+    let classSelectorMap: Map<string, string[]> | null = null;
+    const ensureClassSelectorMap = (): Map<string, string[]> => {
+      if (classSelectorMap) return classSelectorMap;
+      classSelectorMap = new Map<string, string[]>();
+      for (const node of this.queries.getNodesByKind('class_selector')) {
+        const list = classSelectorMap.get(node.name) || [];
+        list.push(node.id);
+        classSelectorMap.set(node.name, list);
+      }
+      return classSelectorMap;
+    };
+
+    for (let i = 0; i < orderedFiles.length; i++) {
+      const filePath = orderedFiles[i]!;
       if (options.signal?.aborted) break;
 
       if (options.onProgress) {
-        options.onProgress({ phase: 'parsing', current: i, total: styleFiles.length, currentFile: filePath });
+        options.onProgress({ phase: 'parsing', current: i, total: orderedFiles.length, currentFile: filePath });
       }
 
       try {
         const fullPath = path.join(this.projectRoot, filePath);
         const source = require('fs').readFileSync(fullPath, 'utf-8');
-        const result = extractFromSource(filePath, source);
+        const isJsx = isJSXFile(filePath);
+
+        let result: import('./types').ExtractionResult;
+        let fileNodeId: string | undefined;
+
+        if (isJsx) {
+          result = extractCSSInJS(filePath, source);
+          fileNodeId = result.nodes.find(n => n.kind === 'file')?.id;
+
+          const refs = extractClassNameUsage(source, filePath);
+          if (refs.length > 0 && fileNodeId) {
+            const map = ensureClassSelectorMap();
+            for (const ref of refs) {
+              const targetIds = map.get(ref.className);
+              if (!targetIds || targetIds.length === 0) continue;
+              for (const targetId of targetIds) {
+                result.edges.push({
+                  source: fileNodeId,
+                  target: targetId,
+                  kind: 'references',
+                  provenance: 'heuristic',
+                  line: ref.line,
+                });
+              }
+            }
+          }
+        } else {
+          result = extractFromSource(filePath, source);
+          fileNodeId = result.nodes.find(n => n.kind === 'file')?.id;
+        }
 
         if (result.errors.length > 0 && result.nodes.length === 0) {
           filesErrored++;

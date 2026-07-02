@@ -54,6 +54,8 @@ export function rail(isDim: boolean = true): string {
 
 let currentPhase = '';
 let phaseStartTime = 0;
+let lastProgressRender = 0;
+const PROGRESS_RENDER_INTERVAL_MS = 50;
 
 export function intro(version: string): void {
   console.log('');
@@ -91,6 +93,12 @@ export function step(msg: string, status: 'ok' | 'warn' | 'err' | 'info' = 'ok')
  * Call with a status object. Set done=true for final static render.
  */
 export function progressBar(current: number, total: number, label: string, done: boolean = false): void {
+  const now = Date.now();
+  if (!done && now - lastProgressRender < PROGRESS_RENDER_INTERVAL_MS) {
+    return;
+  }
+  lastProgressRender = now;
+
   const barWidth = 20;
   const filled = total > 0 ? Math.floor((current / total) * barWidth) : 0;
   const empty = barWidth - filled;
