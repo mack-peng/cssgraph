@@ -243,6 +243,8 @@ export class CodeGraph {
           continue;
         }
 
+        this.db.getDb().exec('BEGIN');
+
         for (const node of result.nodes) {
           this.queries.insertNode(node);
           totalNodes++;
@@ -263,6 +265,8 @@ export class CodeGraph {
           errors: result.errors.length > 0 ? result.errors : undefined,
         };
         this.queries.insertFile(fileRecord);
+
+        this.db.getDb().exec('COMMIT');
 
         filesIndexed++;
         if (result.errors.length > 0) allErrors.push(...result.errors);

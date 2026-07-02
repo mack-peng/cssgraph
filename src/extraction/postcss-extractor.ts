@@ -86,9 +86,11 @@ export function extractFromSource(filePath: string, source: string): ExtractionR
         root = postcss().process(source, { from: filePath, syntax: scssSyntax }).root;
         break;
       }
-      case 'less':
-        try { root = postcss.parse(source, { from: filePath }); } catch { /* fall through */ }
+      case 'less': {
+        const lessSyntax = require('postcss-less');
+        root = postcss().process(source, { from: filePath, syntax: lessSyntax }).root;
         break;
+      }
       default:
         root = postcss.parse(source, { from: filePath });
     }

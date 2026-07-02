@@ -1,4 +1,4 @@
-import { DatabaseSync } from 'node:sqlite';
+import { DatabaseSync, StatementSync } from 'node:sqlite';
 import { Node, Edge, FileRecord, SearchResult, SearchOptions, NodeKind, EdgeKind, Language, GraphStats } from '../types';
 import * as crypto from 'crypto';
 
@@ -9,9 +9,26 @@ function hashId(qualifiedName: string): string {
 export class QueryBuilder {
   private db: DatabaseSync;
   private projectNameTokens: Set<string> = new Set();
+  private insertNodeStmt: StatementSync;
+  private insertEdgeStmt: StatementSync;
+  private insertFileStmt: StatementSync;
 
   constructor(db: DatabaseSync) {
     this.db = db;
+    this.insertNodeStmt = db.prepare(`
+      INSERT OR REPLACE INTO nodes (id, kind, name, qualified_name, file_path, language,
+        start_line, end_line, start_column, end_column, signature, specificity,
+        properties, selector, params, value, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    this.insertEdgeStmt = db.prepare(`
+      INSERT OR IGNORE INTO edges (source, target, kind, metadata, line, col, provenance)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+    this.insertFileStmt = db.prepare(`
+      INSERT OR REPLACE INTO files (path, content_hash, language, size, modified_at, indexed_at, node_count, errors)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `);
   }
 
   setProjectNameTokens(tokens: Set<string>): void {
@@ -27,13 +44,7 @@ export class QueryBuilder {
   // ===========================================================================
 
   insertNode(node: Node): void {
-    const stmt = this.db.prepare(`
-      INSERT OR REPLACE INTO nodes (id, kind, name, qualified_name, file_path, language,
-        start_line, end_line, start_column, end_column, signature, specificity,
-        properties, selector, params, value, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    stmt.run(
+    this.insertNodeStmt.run(
       node.id ?? hashId(node.qualifiedName),
       node.kind,
       node.name,
@@ -55,11 +66,7 @@ export class QueryBuilder {
   }
 
   insertEdge(edge: Edge): void {
-    const stmt = this.db.prepare(`
-      INSERT OR IGNORE INTO edges (source, target, kind, metadata, line, col, provenance)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `);
-    stmt.run(
+    this.insertEdgeStmt.run(
       edge.source,
       edge.target,
       edge.kind,
@@ -152,11 +159,7 @@ export class QueryBuilder {
   // ===========================================================================
 
   insertFile(file: FileRecord): void {
-    const stmt = this.db.prepare(`
-      INSERT OR REPLACE INTO files (path, content_hash, language, size, modified_at, indexed_at, node_count, errors)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    stmt.run(
+    this.insertFileStmt.run(
       file.path,
       file.contentHash,
       file.language,
