@@ -3,7 +3,8 @@
 import { Command } from 'commander';
 import * as path from 'path';
 import * as fs from 'fs';
-import { isInitialized, unsafeIndexRootReason } from '../directory';
+import { isInitialized, unsafeIndexRootReason, getCodeGraphDir } from '../directory';
+import { intro, phase, phaseComplete, progressBar, progressClear, outro, warn, err, step, dim, bold, statLine, formatNumber, formatDuration } from '../ui/output';
 
 const packageJson = JSON.parse(
   fs.readFileSync(path.join(__dirname, '..', '..', 'package.json'), 'utf-8')
@@ -31,25 +32,12 @@ function resolveProjectPath(pathArg?: string): string {
   return absolutePath;
 }
 
-function formatNumber(n: number): string {
-  return n.toLocaleString();
-}
-
-function formatDuration(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  const seconds = ms / 1000;
-  if (seconds < 60) return `${seconds.toFixed(1)}s`;
-  const minutes = Math.floor(seconds / 60);
-  return `${minutes}m ${(seconds % 60).toFixed(0)}s`;
-}
-
 /**
- * codegraph init [path]
+ * cssgraph init [path]
  */
 program
   .command('init [path]')
   .description('Initialize cssgraph in a project directory and build the initial index')
-  .option('-i, --index', 'Deprecated: indexing runs by default')
   .option('-f, --force', 'Initialize even if path looks like home directory or filesystem root')
   .action(async (pathArg: string | undefined, options: { force?: boolean }) => {
     const projectPath = path.resolve(pathArg || process.cwd());
@@ -57,35 +45,88 @@ program
     if (!options.force) {
       const unsafe = unsafeIndexRootReason(projectPath);
       if (unsafe) {
-        console.error(`Refusing to initialize in ${projectPath} — it looks like ${unsafe}.`);
-        console.error('Pass --force to override.');
+        console.error(err(`Refusing to initialize in ${projectPath} — it looks like ${unsafe}.`));
+        console.error('  Pass --force to override.');
         process.exit(1);
       }
     }
 
     if (isInitialized(projectPath)) {
-      console.log(`Already initialized in ${projectPath}`);
-      console.log('Use "cssgraph index" to re-index');
+      console.log(warn(`Already initialized in ${projectPath}`));
+      console.log('  Use "cssgraph index" to re-index');
       return;
     }
 
     try {
+      intro(packageJson.version);
+
       const { default: CodeGraph } = await import('../index');
       const cg = await CodeGraph.init(projectPath, { index: false });
 
-      console.log(`Initialized in ${projectPath}`);
+      step(`Initialized in ${dim(projectPath)}`, 'ok');
 
-      const result = await cg.indexAll();
-      if (result.success) {
-        console.log(`Indexed ${formatNumber(result.filesIndexed)} files`);
-        console.log(`${formatNumber(result.nodesCreated)} nodes, ${formatNumber(result.edgesCreated)} edges in ${formatDuration(result.durationMs)}`);
+      let scanTotal = 0;
+      let lastPhase = '';
+
+      const result = await cg.indexAll({
+        onProgress: (progress) => {
+          if (progress.phase !== lastPhase) {
+            if (lastPhase) progressClear();
+            lastPhase = progress.phase;
+            const label = progress.phase === 'scanning' ? 'Scanning style files' :
+              progress.phase === 'parsing' ? 'Parsing' :
+              progress.phase === 'resolving' ? 'Resolving references' : '';
+            phase(label);
+            if (progress.phase === 'scanning') {
+              scanTotal = progress.total;
+            }
+          }
+          if (progress.phase === 'parsing' && scanTotal > 0) {
+            progressBar(progress.current, progress.total, progress.currentFile || '');
+          }
+        },
+      });
+
+      progressClear();
+      if (lastPhase) phaseComplete();
+
+      const hasErrors = result.filesErrored > 0;
+
+      if (result.filesIndexed > 0) {
+        const filesMsg = hasErrors
+          ? `${formatNumber(result.filesIndexed)} files (${formatNumber(result.filesErrored)} failed)`
+          : `${formatNumber(result.filesIndexed)} files`;
+        step(filesMsg, hasErrors ? 'warn' : 'ok');
+        const statsMsg = `${formatNumber(result.nodesCreated)} nodes  ${dim('│')}  ${formatNumber(result.edgesCreated)} edges  ${dim('│')}  ${formatDuration(result.durationMs)}`;
+        step(statsMsg, 'info');
+      } else if (hasErrors) {
+        step('No files indexed — all failed', 'err');
+
+        const errorsByCode = new Map<string, number>();
+        for (const e of result.errors) {
+          if (e.severity === 'error') {
+            const code = e.code || 'unknown';
+            errorsByCode.set(code, (errorsByCode.get(code) || 0) + 1);
+          }
+        }
+        if (errorsByCode.size > 0) {
+          for (const [code, count] of errorsByCode) {
+            step(`  ${formatNumber(count)} ${code}`, 'warn');
+          }
+        }
       } else {
-        console.log(`Indexed ${formatNumber(result.filesIndexed)} files (${formatNumber(result.filesErrored)} errors)`);
+        step('No style files found', 'warn');
+      }
+
+      if (hasErrors && result.filesIndexed > 0) {
+        const errorLogPath = path.join(getCodeGraphDir(projectPath), 'errors.log');
+        step(`See ${dim(errorLogPath)} for details`, 'info');
       }
 
       cg.destroy();
-    } catch (err) {
-      console.error(`Failed: ${err instanceof Error ? err.message : String(err)}`);
+      outro();
+    } catch (er) {
+      console.error(err(`Failed: ${er instanceof Error ? er.message : String(er)}`));
       process.exit(1);
     }
   });
@@ -115,20 +156,45 @@ program
     }
 
     try {
+      if (!options.quiet) intro(packageJson.version);
+
       const { default: CodeGraph } = await import('../index');
-      if (!options.quiet) {
-        console.log('Indexing project...');
-      }
-
       const cg = await CodeGraph.open(projectPath);
+      (cg as any)['queries']['clear']();
 
-      const result = await cg.indexAll();
+      let scanTotal = 0;
+      let lastPhase = '';
+
+      const result = await cg.indexAll({
+        onProgress: options.quiet ? undefined : (progress) => {
+          if (progress.phase !== lastPhase) {
+            if (lastPhase) progressClear();
+            lastPhase = progress.phase;
+            const label = progress.phase === 'scanning' ? 'Scanning style files' :
+              progress.phase === 'parsing' ? 'Parsing' : '';
+            phase(label);
+            if (progress.phase === 'scanning') scanTotal = progress.total;
+          }
+          if (progress.phase === 'parsing' && scanTotal > 0) {
+            progressBar(progress.current, progress.total, progress.currentFile || '');
+          }
+        },
+      });
+
       if (!options.quiet) {
-        console.log(`Indexed ${formatNumber(result.filesIndexed)} files`);
-        console.log(`${formatNumber(result.nodesCreated)} nodes, ${formatNumber(result.edgesCreated)} edges in ${formatDuration(result.durationMs)}`);
+        progressClear();
+        if (lastPhase) phaseComplete();
+
+        if (result.filesIndexed > 0) {
+          step(`${formatNumber(result.filesIndexed)} files`, 'ok');
+          step(`${formatNumber(result.nodesCreated)} nodes  ${dim('│')}  ${formatNumber(result.edgesCreated)} edges  ${dim('│')}  ${formatDuration(result.durationMs)}`, 'info');
+        } else {
+          step('No style files found', 'warn');
+        }
+        outro();
       }
 
-      if (!result.success) process.exit(1);
+      if (!result.success && !options.quiet) process.exit(1);
       cg.destroy();
     } catch (err) {
       console.error(`Failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -178,17 +244,17 @@ program
         return;
       }
 
-      console.log('\ncssgraph Status\n');
-      console.log(`Project: ${projectPath}`);
-      console.log(`  Files:  ${formatNumber(stats.fileCount)}`);
-      console.log(`  Nodes:  ${formatNumber(stats.nodeCount)}`);
-      console.log(`  Edges:  ${formatNumber(stats.edgeCount)}`);
+      console.log(`\n${bold('cssgraph Status')}\n`);
+      console.log(statLine('Project', projectPath));
+      console.log(statLine('Files', formatNumber(stats.fileCount)));
+      console.log(statLine('Nodes', formatNumber(stats.nodeCount)));
+      console.log(statLine('Edges', formatNumber(stats.edgeCount)));
 
       const nodesByKind = Object.entries(stats.nodesByKind).filter(([, c]) => c > 0).sort((a, b) => b[1] - a[1]);
       if (nodesByKind.length > 0) {
-        console.log('\nNodes by Kind:');
+        console.log(`\n${bold('Nodes by Kind:')}`);
         for (const [kind, count] of nodesByKind) {
-          console.log(`  ${kind.padEnd(18)} ${formatNumber(count)}`);
+          console.log(`  ${dim(kind.padEnd(18))} ${formatNumber(count)}`);
         }
       }
 
