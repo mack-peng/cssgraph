@@ -603,6 +603,96 @@ program
     });
 
   /**
+   * cssgraph rule <selector>
+   */
+  program
+    .command('rule <selector>')
+    .description('Analyze impact of a CSS selector')
+    .option('-p, --path <path>', 'Project path')
+    .option('--strict', 'Show only files that reference every class in the selector')
+    .option('--json', 'Output as JSON')
+    .action(async (selector: string, options: { path?: string; strict?: boolean; json?: boolean }) => {
+      const projectPath = resolveProjectPath(options.path);
+
+      if (!isInitialized(projectPath)) {
+        console.error(`Not initialized in ${projectPath}. Run "cssgraph init" first.`);
+        process.exit(1);
+      }
+
+      try {
+        const { default: CodeGraph } = await import('../index');
+        const cg = await CodeGraph.open(projectPath);
+        const result = cg.analyzeRule(selector);
+
+        if (options.json) {
+          console.log(JSON.stringify(result, null, 2));
+        } else {
+          console.log(`\n${bold('Rule:')} ${selector}\n`);
+
+          if (result.classes.length > 0) {
+            console.log(`${bold('Classes:')} ${result.classes.map(c => `.${c}`).join(' ')}`);
+          }
+          if (result.ids.length > 0) {
+            console.log(`${bold('IDs:')} ${result.ids.map(i => `#${i}`).join(' ')}`);
+          }
+          if (result.tags.length > 0) {
+            console.log(`${bold('Tags:')} ${result.tags.join(' ')}`);
+          }
+          console.log('');
+
+          if (result.exactMatches.length === 0) {
+            console.log(`${bold('Exact matches:')} (none)\n`);
+          } else {
+            console.log(`${bold('Exact matches:')}`);
+            for (const m of result.exactMatches) {
+              console.log(`  ${m.node.selector ?? m.node.name}  ${dim(`${m.node.filePath}:${m.node.startLine}`)}`);
+            }
+            console.log('');
+          }
+
+          if (result.containsMatches.length === 0) {
+            console.log(`${bold('Related selectors:')} (none)\n`);
+          } else {
+            console.log(`${bold('Related selectors:')}`);
+            for (const m of result.containsMatches) {
+              console.log(`  ${m.node.selector ?? m.node.name}  ${dim(`${m.node.filePath}:${m.node.startLine}`)}`);
+            }
+            console.log('');
+          }
+
+          if (result.classUsage.length === 0) {
+            console.log(`${bold('Class usage:')} (none)\n`);
+          } else {
+            console.log(`${bold('Class usage:')}`);
+            for (const u of result.classUsage) {
+              console.log(`  .${u.className}  ${dim(`→ ${u.files.length} files${u.nodeCount > 0 ? `, ${u.nodeCount} selector nodes` : ''}`)}`);
+            }
+            console.log('');
+          }
+
+          const files = options.strict ? result.strictFiles : result.looseFiles;
+          const label = options.strict ? 'Strict impact' : 'Loose impact';
+          if (files.length === 0) {
+            console.log(`${bold(`${label}:`)} (none)`);
+          } else {
+            console.log(`${bold(`${label}:`)} ${files.length} files`);
+            for (const f of files.slice(0, 50)) {
+              console.log(`  ${f}`);
+            }
+            if (files.length > 50) {
+              console.log(`  ${dim(`... and ${files.length - 50} more`)}`);
+            }
+          }
+        }
+
+        cg.destroy();
+      } catch (err) {
+        console.error(`rule analysis failed: ${err instanceof Error ? err.message : String(err)}`);
+        process.exit(1);
+      }
+    });
+
+  /**
    * codegraph files
    */
   program

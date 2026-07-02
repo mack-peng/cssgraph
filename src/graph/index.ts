@@ -1,6 +1,10 @@
 import { QueryBuilder } from '../db/queries';
-import { Node, Context, UnusedResult, CascadeResult, CascadeStep, PropertySearchOptions, PropertySearchResult } from '../types';
+import {
+  Node, Context, UnusedResult, CascadeResult, CascadeStep,
+  PropertySearchOptions, PropertySearchResult, RuleAnalysisResult,
+} from '../types';
 import { GraphTraverser } from './traversal';
+import selectorParser from 'postcss-selector-parser';
 
 export { GraphTraverser } from './traversal';
 
@@ -120,6 +124,96 @@ export class GraphQueryManager {
     });
   }
 
+  analyzeRule(selector: string): RuleAnalysisResult {
+    const parsed = parseSelector(selector);
+
+    const makeKey = (n: Node) => `${n.filePath}:${n.startLine}:${n.selector ?? n.name}`;
+    const dedupeNodes = (nodes: Node[]): Node[] => {
+      const seen = new Set<string>();
+      return nodes.filter(n => {
+        const key = makeKey(n);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    };
+
+    const exactNodes = dedupeNodes(this.queries.getClassSelectorsBySelector(selector));
+    const exactMatches = exactNodes.map(n => ({
+      node: n,
+      properties: n.properties ?? this.getPropertiesForNode(n.id),
+    }));
+
+    const containsNodes = dedupeNodes(this.queries.getClassSelectorsContainingClasses(parsed.classes));
+    const containsMatches = containsNodes.map(n => ({
+      node: n,
+      properties: n.properties ?? this.getPropertiesForNode(n.id),
+    }));
+
+    const classUsage: RuleAnalysisResult['classUsage'] = [];
+    const classToFiles = new Map<string, Set<string>>();
+
+    for (const cls of parsed.classes) {
+      const files = new Set<string>();
+      const nodes = this.queries.getClassSelectorsByName(cls);
+      for (const node of nodes) {
+        const incoming = this.queries.getIncomingEdges(node.id);
+        for (const edge of incoming) {
+          if (edge.kind !== 'references') continue;
+          const source = this.queries.getNodeById(edge.source);
+          if (source) files.add(source.filePath);
+        }
+      }
+      classToFiles.set(cls, files);
+      classUsage.push({ className: cls, files: Array.from(files).sort(), nodeCount: nodes.length });
+    }
+
+    const allFiles = new Set<string>();
+    const intersection = new Set<string>();
+    let first = true;
+
+    for (const [, files] of classToFiles) {
+      for (const f of files) allFiles.add(f);
+      if (first) {
+        for (const f of files) intersection.add(f);
+        first = false;
+      } else {
+        for (const f of Array.from(intersection)) {
+          if (!files.has(f)) intersection.delete(f);
+        }
+      }
+    }
+
+    // Files that define the selector itself are always in the loose impact set.
+    for (const m of exactMatches) allFiles.add(m.node.filePath);
+    for (const m of containsMatches) allFiles.add(m.node.filePath);
+
+    return {
+      selector,
+      classes: parsed.classes,
+      ids: parsed.ids,
+      tags: parsed.tags,
+      exactMatches,
+      containsMatches,
+      classUsage,
+      looseFiles: Array.from(allFiles).sort(),
+      strictFiles: Array.from(intersection).sort(),
+    };
+  }
+
+  private getPropertiesForNode(nodeId: string): Array<{ property: string; value: string }> {
+    const outgoing = this.queries.getOutgoingEdges(nodeId);
+    const props: Array<{ property: string; value: string }> = [];
+    for (const edge of outgoing) {
+      if (edge.kind !== 'contains') continue;
+      const child = this.queries.getNodeById(edge.target);
+      if (child?.kind === 'css_property' && child.value !== undefined) {
+        props.push({ property: child.name, value: child.value });
+      }
+    }
+    return props;
+  }
+
   getNodeMetrics(nodeId: string): {
     incomingEdgeCount: number;
     outgoingEdgeCount: number;
@@ -142,6 +236,37 @@ export class GraphQueryManager {
       depth: ancestors.length,
     };
   }
+}
+
+function parseSelector(selector: string): { classes: string[]; ids: string[]; tags: string[] } {
+  const classes = new Set<string>();
+  const ids = new Set<string>();
+  const tags = new Set<string>();
+
+  try {
+    const root = selectorParser().astSync(selector);
+    root.walk((node) => {
+      if (node.type === 'class') {
+        classes.add(node.value);
+      } else if (node.type === 'id') {
+        ids.add(node.value);
+      } else if (node.type === 'tag') {
+        tags.add(node.value);
+      }
+    });
+  } catch {
+    // Fall back to regex extraction if parsing fails
+    const classMatches = selector.match(/\.([a-zA-Z0-9_\-]+)/g);
+    classMatches?.forEach(m => classes.add(m.slice(1)));
+    const idMatches = selector.match(/#([a-zA-Z0-9_\-]+)/g);
+    idMatches?.forEach(m => ids.add(m.slice(1)));
+  }
+
+  return {
+    classes: Array.from(classes),
+    ids: Array.from(ids),
+    tags: Array.from(tags),
+  };
 }
 
 function cmpSpecificityDesc(

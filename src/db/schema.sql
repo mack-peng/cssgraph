@@ -74,6 +74,8 @@ CREATE INDEX IF NOT EXISTS idx_nodes_file_path ON nodes(file_path);
 CREATE INDEX IF NOT EXISTS idx_nodes_language ON nodes(language);
 CREATE INDEX IF NOT EXISTS idx_nodes_lower_name ON nodes(lower(name));
 CREATE INDEX IF NOT EXISTS idx_nodes_value ON nodes(value);
+CREATE INDEX IF NOT EXISTS idx_nodes_selector ON nodes(selector);
+CREATE INDEX IF NOT EXISTS idx_nodes_kind_name ON nodes(kind, name);
 
 CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(
     id,

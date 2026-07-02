@@ -160,6 +160,23 @@ export interface PropertySearchResult {
   selectorNode?: Node;
 }
 
+export interface RuleMatch {
+  node: Node;
+  properties: Array<{ property: string; value: string }>;
+}
+
+export interface RuleAnalysisResult {
+  selector: string;
+  classes: string[];
+  ids: string[];
+  tags: string[];
+  exactMatches: RuleMatch[];
+  containsMatches: RuleMatch[];
+  classUsage: Array<{ className: string; files: string[]; nodeCount: number }>;
+  looseFiles: string[];
+  strictFiles: string[];
+}
+
 export interface CascadeStep {
   node: Node;
   specificity?: [number, number, number, number];

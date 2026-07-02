@@ -14,6 +14,7 @@ export class QueryBuilder {
   private insertFileStmt: StatementSync;
   private classSelectorsWithoutRefsStmt: StatementSync;
   private classSelectorsByNameStmt: StatementSync;
+  private classSelectorsBySelectorStmt: StatementSync;
   private propertiesByValueStmt: StatementSync;
   private propertiesByPropertyValueStmt: StatementSync;
 
@@ -45,6 +46,11 @@ export class QueryBuilder {
     this.classSelectorsByNameStmt = db.prepare(`
       SELECT * FROM nodes
       WHERE kind = 'class_selector' AND lower(name) = lower(?)
+      ORDER BY file_path, start_line
+    `);
+    this.classSelectorsBySelectorStmt = db.prepare(`
+      SELECT * FROM nodes
+      WHERE kind = 'class_selector' AND selector = ?
       ORDER BY file_path, start_line
     `);
     this.propertiesByValueStmt = db.prepare(`
@@ -175,6 +181,23 @@ export class QueryBuilder {
 
   getClassSelectorsByName(name: string): Node[] {
     const rows = this.classSelectorsByNameStmt.all(name) as Record<string, unknown>[];
+    return rows.map(r => this.rowToNode(r));
+  }
+
+  getClassSelectorsBySelector(selector: string): Node[] {
+    const rows = this.classSelectorsBySelectorStmt.all(selector) as Record<string, unknown>[];
+    return rows.map(r => this.rowToNode(r));
+  }
+
+  getClassSelectorsContainingClasses(classes: string[]): Node[] {
+    if (classes.length === 0) return [];
+    const conditions = classes.map(() => "(selector LIKE ? OR name = ?)").join(" AND ");
+    const params: string[] = [];
+    for (const cls of classes) {
+      params.push(`%.${cls}%`, cls);
+    }
+    const sql = `SELECT * FROM nodes WHERE kind = 'class_selector' AND ${conditions} ORDER BY file_path, start_line`;
+    const rows = this.db.prepare(sql).all(...params) as Record<string, unknown>[];
     return rows.map(r => this.rowToNode(r));
   }
 

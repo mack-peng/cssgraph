@@ -242,6 +242,56 @@ export class MCPServer {
           cg.destroy();
         }
       }
+      case 'cssgraph_rule': {
+        const selector = args['selector'] as string || '';
+        const { default: CodeGraph } = await import('../index');
+        const root = CodeGraph.isInitialized(cwd) ? cwd : (await this.findRoot(cwd));
+        if (!root) return 'cssgraph is not initialized.';
+        const cg = await CodeGraph.open(root);
+        try {
+          const result = cg.analyzeRule(selector);
+          if (result.exactMatches.length === 0 && result.containsMatches.length === 0 && result.classUsage.length === 0) {
+            return `No rules found matching "${selector}".`;
+          }
+
+          const lines: string[] = [`Rule: ${selector}\n`];
+
+          if (result.exactMatches.length > 0) {
+            lines.push('Exact matches:');
+            for (const m of result.exactMatches) {
+              lines.push(`  ${m.node.selector ?? m.node.name} — ${m.node.filePath}:${m.node.startLine}`);
+            }
+            lines.push('');
+          }
+
+          if (result.containsMatches.length > 0) {
+            lines.push('Related selectors:');
+            for (const m of result.containsMatches) {
+              lines.push(`  ${m.node.selector ?? m.node.name} — ${m.node.filePath}:${m.node.startLine}`);
+            }
+            lines.push('');
+          }
+
+          lines.push('Class usage:');
+          for (const u of result.classUsage) {
+            lines.push(`  .${u.className} → ${u.files.length} files`);
+          }
+          lines.push('');
+
+          lines.push(`Loose impact: ${result.looseFiles.length} files`);
+          lines.push(`Strict impact: ${result.strictFiles.length} files`);
+          for (const f of result.strictFiles.slice(0, 20)) {
+            lines.push(`  ${f}`);
+          }
+          if (result.strictFiles.length > 20) {
+            lines.push(`  ... and ${result.strictFiles.length - 20} more`);
+          }
+
+          return lines.join('\n');
+        } finally {
+          cg.destroy();
+        }
+      }
       default:
         return `Unknown tool: ${name}`;
     }
@@ -305,6 +355,17 @@ export class MCPServer {
             className: { type: 'string', description: 'Class name' },
           },
           required: ['className'],
+        },
+      },
+      {
+        name: 'cssgraph_rule',
+        description: 'Analyze the impact radius of a CSS selector (exact, related selectors, class usage, loose/strict impact).',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            selector: { type: 'string', description: 'Full CSS selector to analyze' },
+          },
+          required: ['selector'],
         },
       },
       {

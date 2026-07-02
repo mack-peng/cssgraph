@@ -2,7 +2,7 @@ import * as path from 'path';
 import {
   Node, Edge, FileRecord, Subgraph, TraversalOptions,
   SearchOptions, SearchResult, GraphStats, IndexProgress, IndexResult, SyncResult,
-  UnusedResult, CascadeResult, PropertySearchOptions, PropertySearchResult,
+  UnusedResult, CascadeResult, PropertySearchOptions, PropertySearchResult, RuleAnalysisResult,
 } from './types';
 import { DatabaseConnection, getDatabasePath } from './db';
 import { QueryBuilder } from './db/queries';
@@ -570,6 +570,10 @@ export class CodeGraph {
 
   searchByPropertyValue(options: PropertySearchOptions): PropertySearchResult[] {
     return this.graphQueries.searchByPropertyValue(options);
+  }
+
+  analyzeRule(selector: string): RuleAnalysisResult {
+    return this.graphQueries.analyzeRule(selector);
   }
 
   // ===========================================================================

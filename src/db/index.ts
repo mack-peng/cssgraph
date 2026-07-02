@@ -47,6 +47,8 @@ export class DatabaseConnection {
   private static ensureRuntimeIndexes(db: DatabaseSync): void {
     try {
       db.exec(`CREATE INDEX IF NOT EXISTS idx_nodes_value ON nodes(value)`);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_nodes_selector ON nodes(selector)`);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_nodes_kind_name ON nodes(kind, name)`);
     } catch { /* best effort */ }
   }
 
