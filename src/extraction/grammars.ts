@@ -8,8 +8,11 @@ export function detectLanguage(filePath: string): Language {
     case 'less': return 'less';
     case 'sass': return 'sass';
     case 'pcss': return 'pcss';
+    case 'js': return 'js';
+    case 'ts': return 'ts';
     case 'jsx': return 'jsx';
     case 'tsx': return 'tsx';
+    case 'es6': return 'es6';
     default: return 'unknown';
   }
 }
@@ -20,12 +23,13 @@ export function isSourceFile(filePath: string): boolean {
 }
 
 export function isLanguageSupported(lang: Language): boolean {
-  return lang === 'css' || lang === 'scss' || lang === 'less' || lang === 'sass' || lang === 'pcss' || lang === 'jsx' || lang === 'tsx';
+  return lang === 'css' || lang === 'scss' || lang === 'less' || lang === 'sass' || lang === 'pcss' ||
+    lang === 'js' || lang === 'ts' || lang === 'jsx' || lang === 'tsx' || lang === 'es6';
 }
 
 export function isJSXFile(filePath: string): boolean {
   const ext = filePath.split('.').pop()?.toLowerCase();
-  return ext === 'jsx' || ext === 'tsx';
+  return ext === 'jsx' || ext === 'tsx' || ext === 'es6' || ext === 'js' || ext === 'ts';
 }
 
 export function isFileLevelOnlyLanguage(_lang: Language): boolean {

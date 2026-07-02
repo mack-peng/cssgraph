@@ -24,8 +24,11 @@ export const LANGUAGES = [
   'less',
   'sass',
   'pcss',
+  'js',
+  'ts',
   'jsx',
   'tsx',
+  'es6',
   'unknown',
 ] as const;
 

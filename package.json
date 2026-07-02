@@ -39,6 +39,7 @@
     "postcss-less": "^6.0.0",
     "postcss-scss": "^4.0.9",
     "postcss-selector-parser": "^7.1.4",
+    "source-map-js": "^1.2.1",
     "web-tree-sitter": "^0.25.3"
   },
   "devDependencies": {

@@ -12,6 +12,7 @@ import { GraphTraverser, GraphQueryManager } from './graph';
 import { extractFromSource } from './extraction/postcss-extractor';
 import { extractCSSInJS } from './extraction/css-in-js-extractor';
 import { extractClassNameUsage } from './extraction/jsx-classname-extractor';
+import { findCSSModuleImports, extractCSSModuleUsage, resolveCSSModulePath } from './extraction/css-modules-resolver';
 import { createContextBuilder, ContextBuilder } from './context';
 import { Mutex, FileLock } from './utils';
 import { FileWatcher, WatchOptions, PendingFile, LockUnavailableError } from './sync';
@@ -282,6 +283,51 @@ export class CodeGraph {
                   provenance: 'heuristic',
                   line: ref.line,
                 });
+              }
+            }
+          }
+
+          // CSS Modules dynamic import / require
+          if (fileNodeId) {
+            const cssModuleImports = findCSSModuleImports(source);
+            for (const imp of cssModuleImports) {
+              const cssModulePath = resolveCSSModulePath(this.projectRoot, path.join(this.projectRoot, filePath), imp.importPath);
+              const cssFileNodeId = require('crypto').createHash('sha256').update(`file:${cssModulePath}`).digest('hex').slice(0, 16);
+
+              result.edges.push({
+                source: fileNodeId,
+                target: cssFileNodeId,
+                kind: 'imports',
+                provenance: 'heuristic',
+                line: imp.line,
+              });
+
+              if (imp.bindingName) {
+                const moduleSelectors = this.queries.getNodesByFile(cssModulePath)
+                  .filter(n => n.kind === 'class_selector');
+                if (moduleSelectors.length > 0) {
+                  const moduleClassMap = new Map<string, string[]>();
+                  for (const node of moduleSelectors) {
+                    const list = moduleClassMap.get(node.name) || [];
+                    list.push(node.id);
+                    moduleClassMap.set(node.name, list);
+                  }
+
+                  const usages = extractCSSModuleUsage(source, imp.bindingName);
+                  for (const usage of usages) {
+                    const targetIds = moduleClassMap.get(usage.className);
+                    if (!targetIds || targetIds.length === 0) continue;
+                    for (const targetId of targetIds) {
+                      result.edges.push({
+                        source: fileNodeId,
+                        target: targetId,
+                        kind: 'references',
+                        provenance: 'heuristic',
+                        line: usage.line,
+                      });
+                    }
+                  }
+                }
               }
             }
           }

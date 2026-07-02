@@ -14,23 +14,27 @@
 
 ## styled-components / CSS-in-JS
 
-- [ ] 解析 `styled.div` 模板字面量中的 CSS
-- [ ] 提取 `styled(Component)` 继承链
-- [ ] 支持 emotion / stitches / vanilla-extract / panda-css 等主流方案
+- [x] 解析 `styled.div` 模板字面量中的 CSS
+- [x] 解析 `styled(Component)` 模板字面量
+- [ ] 提取 `styled(Component)` 继承链（建立 references 边）
+- [x] 支持 emotion `css` 模板字面量（styled-components 同款）
+- [ ] 支持 stitches / vanilla-extract / panda-css 等对象语法方案
 - [ ] 难点：CSS-in-JS 的样式是运行时确定的，静态分析只能覆盖模板字面量形式
 
 ## CSS Modules 动态 import 场景
 
-- [ ] 处理 `const styles = await import('./X.module.css')` 动态导入
-- [ ] 处理 `require('./X.module.css')` CommonJS 形式
-- [ ] 解析 webpack/vite loader 输出的 source map 实现哈希反向映射
+- [x] 处理 `const styles = await import('./X.module.css')` 动态导入
+- [x] 处理 `import('./X.module.css').then(...)` 无绑定导入（imports 边）
+- [x] 处理 `require('./X.module.css')` CommonJS 形式
+- [x] 提取 `styles.foo` / `styles['foo-bar']` 等 CSS module 类名引用
+- [ ] 解析 webpack/vite loader 输出的 source map 实现哈希反向映射（utility 已加，未完整集成）
 
 ## 增强查询能力
 
-- [ ] `cssgraph diff <branch>` — 对比两个分支的样式变更
-- [ ] `cssgraph unused` — 检测未被引用的 className（类似 PurgeCSS 但基于图查询）
-- [ ] `cssgraph cascade <className>` — 可视化特定 className 的完整层叠路径
-- [ ] 支持按 CSS 属性值搜索（如查询所有设置了 `display: flex` 的选择器）
+- [ ] `cssgraph diff <branch>` — 对比两个分支的样式变更（暂缓）
+- [x] `cssgraph unused` — 检测未被引用的 className（类似 PurgeCSS 但基于图查询）
+- [x] `cssgraph cascade <className>` — 可视化特定 className 的完整层叠路径
+- [x] 支持按 CSS 属性值搜索（如查询所有设置了 `display: flex` 的选择器）
 
 ## 性能优化
 
@@ -40,6 +44,7 @@
 
 ## 扩展语言支持
 
-- [ ] Sass（缩进语法 `.sass`）
-- [ ] PostCSS 自定义语法（`.pcss`）
+- [x] Sass（缩进语法 `.sass`）
+- [x] PostCSS 自定义语法（`.pcss`）
+- [x] `.es6` 作为 JSX 类文件处理
 - [ ] Lightning CSS 作为备选解析器（性能更优）

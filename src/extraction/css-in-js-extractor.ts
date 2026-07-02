@@ -1,5 +1,6 @@
 import postcss from 'postcss';
 import { Node, Edge, ExtractionResult, ExtractionError } from '../types';
+import { detectLanguage } from './grammars';
 import * as crypto from 'crypto';
 import * as path from 'path';
 
@@ -122,7 +123,7 @@ export function extractCSSInJS(filePath: string, source: string): ExtractionResu
   const errors: ExtractionError[] = [];
 
   const fileBaseName = path.basename(filePath, path.extname(filePath));
-  const language = filePath.endsWith('x') ? 'tsx' : 'jsx';
+  const language = detectLanguage(filePath);
   const fileNodeId = hashId(`file:${filePath}`);
 
   nodes.push({
@@ -178,7 +179,7 @@ export function extractCSSInJS(filePath: string, source: string): ExtractionResu
           name: decl.prop,
           qualifiedName: `${filePath}::${match.tag}::${match.componentName}::${decl.prop}`,
           filePath,
-          language,
+          language: detectLanguage(filePath),
           startLine: match.startLine,
           endLine: match.endLine,
           startColumn: 0,
