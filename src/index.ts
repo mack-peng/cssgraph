@@ -199,7 +199,7 @@ export class CodeGraph {
     });
   }
 
-  private async scanAndIndex(options: IndexOptions): Promise<IndexResult> {
+  private async scanAndIndex(options: IndexOptions, fileFilter?: string[]): Promise<IndexResult> {
     const projectConfig = loadProjectConfig(this.projectRoot);
 
     // Collect files into buckets — git ls-files first, filesystem walk fallback.
@@ -207,6 +207,16 @@ export class CodeGraph {
     const jsxFiles: string[] = [];
     let fileCount = 0;
 
+    if (fileFilter) {
+      // Incremental mode: use pre-computed file list (already in correct order).
+      for (const relativePath of fileFilter) {
+        if (isJSXFile(relativePath)) {
+          if (options.jsx) jsxFiles.push(relativePath);
+        } else {
+          styleFiles.push(relativePath);
+        }
+      }
+    } else {
     const gitFiles = getGitVisibleFiles(this.projectRoot);
     if (gitFiles) {
       for (const relativePath of gitFiles) {
@@ -267,6 +277,7 @@ export class CodeGraph {
       };
 
       scanFiles(this.projectRoot);
+    }
     }
 
     // Style files must be indexed before JSX files so class selectors exist for references.
@@ -588,16 +599,84 @@ export class CodeGraph {
 
       try {
         const startTime = Date.now();
-        const result = await this.scanAndIndex(options);
+
+        // Incremental: detect changed files, skip unchanged.
+        const gitFiles = getGitVisibleFiles(this.projectRoot);
+        if (!gitFiles) {
+          // Non-git project — fall back to full rebuild.
+          this.db.setIndexMode();
+          const result = await this.scanAndIndex(options);
+          return {
+            filesChecked: result.filesIndexed + result.filesSkipped + result.filesErrored,
+            filesAdded: result.filesIndexed,
+            filesModified: 0,
+            filesRemoved: 0,
+            nodesUpdated: result.nodesCreated,
+            durationMs: Date.now() - startTime,
+          };
+        }
+
+        const dbFiles = this.queries.getAllFiles();
+        const dbFilePaths = new Set(dbFiles.map(f => f.path));
+        const dbFileHashes = new Map(dbFiles.map(f => [f.path, f.contentHash]));
+        const gitFileSet = new Set(gitFiles);
+
+        // Removed files.
+        const removed = dbFiles.filter(f => !gitFileSet.has(f.path));
+        for (const r of removed) this.queries.deleteFile(r.path);
+
+        // Added + potentially modified files.
+        const added: string[] = [];
+        const modified: string[] = [];
+        let filesChecked = removed.length;
+
+        const fs = require('fs') as typeof import('fs');
+        for (const fp of gitFiles) {
+          const lang = detectLanguage(fp);
+          if (lang === 'unknown' || !isLanguageSupported(lang)) continue;
+          if (lang !== 'less' && lang !== 'scss' && lang !== 'css' && lang !== 'sass' && lang !== 'pcss') {
+            if (!options.jsx) continue;
+            if (!isJSXFile(fp)) continue;
+          }
+
+          if (!dbFilePaths.has(fp)) {
+            added.push(fp);
+          } else {
+            // Check content hash (lightweight: stat + read only if mtime differs).
+            try {
+              const fullPath = require('path').join(this.projectRoot, fp);
+              const content = fs.readFileSync(fullPath, 'utf-8');
+              const contentHash = require('crypto').createHash('sha256').update(content).digest('hex');
+              if (contentHash !== dbFileHashes.get(fp)) {
+                modified.push(fp);
+              }
+            } catch { /* skip unreadable files */ }
+          }
+          filesChecked++;
+        }
+
+        if (removed.length === 0 && added.length === 0 && modified.length === 0) {
+          return { filesChecked, filesAdded: 0, filesModified: 0, filesRemoved: 0, nodesUpdated: 0, durationMs: Date.now() - startTime };
+        }
+
+        // Re-index changed files: style files first, then JSX.
+        const changedStyle = [...added, ...modified].filter(f => !isJSXFile(f));
+        const changedJSX = [...added, ...modified].filter(f => isJSXFile(f));
+        const changedFiles = [...changedStyle, ...changedJSX];
+
+        this.db.setIndexMode();
+        const result = await this.scanAndIndex({ jsx: options.jsx }, changedFiles);
+
         return {
-          filesChecked: result.filesIndexed + result.filesSkipped + result.filesErrored,
-          filesAdded: result.filesIndexed,
-          filesModified: 0,
-          filesRemoved: 0,
+          filesChecked,
+          filesAdded: added.length,
+          filesModified: modified.length,
+          filesRemoved: removed.length,
           nodesUpdated: result.nodesCreated,
           durationMs: Date.now() - startTime,
         };
       } finally {
+        this.db.restoreNormalMode();
         this.fileLock.release();
       }
     });
