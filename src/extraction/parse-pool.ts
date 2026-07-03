@@ -42,6 +42,7 @@ interface PendingJob {
 
 interface IdleWorker {
   worker: Worker;
+  jobId: number | null;
 }
 
 export class ParseWorkerPool {
@@ -96,18 +97,22 @@ export class ParseWorkerPool {
 
     try {
       const worker = new Worker(this.scriptPath);
-      const w: IdleWorker = { worker };
+      const w: IdleWorker = { worker, jobId: null };
 
       worker.on('message', (msg: { type?: string; id: number; ok: boolean; result?: ExtractionResult; jsxRefs?: ParseResult['jsxRefs']; error?: string }) => {
-        // First message is the 'ready' signal — worker is alive and listening.
         if (msg.type === 'ready') {
           this.idle.push(w);
           this.flush();
           return;
         }
 
+        w.jobId = null;
         const job = this.pending.get(msg.id);
-        if (!job) { this.idle.push(w); return; }
+        if (!job) {
+          if (!this.running) { worker.terminate().catch(() => {}); return; }
+          this.idle.push(w);
+          return;
+        }
         this.pending.delete(msg.id);
 
         if (!msg.ok || !msg.result) {
@@ -121,6 +126,11 @@ export class ParseWorkerPool {
 
       worker.on('error', () => {
         this.spawnCount--;
+        // Reject the pending job this worker was handling (if any).
+        if (w.jobId !== null) {
+          const job = this.pending.get(w.jobId);
+          if (job) { this.pending.delete(w.jobId); job.reject(new Error('Worker crashed')); }
+        }
         worker.terminate().catch(() => {});
         this.flush();
       });
@@ -130,6 +140,7 @@ export class ParseWorkerPool {
   }
 
   private dispatch(job: PendingJob, w: IdleWorker): void {
+    w.jobId = job.id;
     w.worker.postMessage({
       id: job.id,
       type: job.task.type,
