@@ -21,6 +21,7 @@ import { Mutex, FileLock } from './utils';
 import { FileWatcher, WatchOptions, PendingFile, LockUnavailableError } from './sync';
 import { getDefaultExcludes, loadProjectConfig } from './config';
 import { getGitVisibleFiles } from './extraction/git-scanner';
+import { ParseWorkerPool, resolveParsePoolSize } from './extraction/parse-pool';
 import { deriveProjectNameTokens } from './search/query-utils';
 
 export * from './types';
@@ -303,7 +304,16 @@ export class CodeGraph {
 
     const SAVEPOINT_BATCH_SIZE = 100;
     const FILE_IO_BATCH_SIZE = 10;
-    const MAX_FILE_SIZE = 1_000_000; // 1 MB — skip minified / generated files
+    const MAX_FILE_SIZE = 1_000_000; // 1 MB
+
+    const parseWorkerPath = require('path').join(__dirname, 'extraction', 'parse-worker.js');
+    let pool: ParseWorkerPool | null = null;
+    if (require('fs').existsSync(parseWorkerPath)) {
+      pool = new ParseWorkerPool({
+        size: resolveParsePoolSize(process.env.CSSGRAPH_PARSE_WORKERS),
+        workerScriptPath: parseWorkerPath,
+      });
+    }
 
     this.db.getDb().exec('BEGIN');
     let fileCountInBatch = 0;
@@ -381,28 +391,41 @@ export class CodeGraph {
         let fileNodeId: string | undefined;
 
         if (isJsx) {
-          result = extractCSSInJS(filePath, source);
-          fileNodeId = result.nodes.find(n => n.kind === 'file')?.id;
+          if (pool) {
+            const pr = await pool.requestParse({ type: 'jsx', filePath, content: source });
+            result = pr.result;
+            fileNodeId = result.nodes.find(n => n.kind === 'file')?.id;
 
-          // Fast-skip: only scan className references and CSS modules if file has JSX markers.
-          if (hasJSXMarkers(source) && fileNodeId) {
-            const refs = extractClassNameUsage(source, filePath);
-            if (refs.length > 0) {
-              for (const ref of refs) {
+            if (hasJSXMarkers(source) && fileNodeId && pr.jsxRefs) {
+              for (const ref of pr.jsxRefs) {
                 const targetIds = classSelectorMap.get(ref.className);
                 if (!targetIds || targetIds.length === 0) continue;
                 for (const targetId of targetIds) {
-                  result.edges.push({
-                    source: fileNodeId,
-                    target: targetId,
-                    kind: 'references',
-                    provenance: 'heuristic',
-                    line: ref.line,
-                  });
+                  result.edges.push({ source: fileNodeId, target: targetId, kind: 'references', provenance: 'heuristic', line: ref.line });
                 }
               }
             }
+          } else {
+            result = extractCSSInJS(filePath, source);
+            fileNodeId = result.nodes.find(n => n.kind === 'file')?.id;
 
+            // Fast-skip: only scan className references and CSS modules if file has JSX markers.
+            if (hasJSXMarkers(source) && fileNodeId) {
+              const refs = extractClassNameUsage(source, filePath);
+              if (refs.length > 0) {
+                for (const ref of refs) {
+                  const targetIds = classSelectorMap.get(ref.className);
+                  if (!targetIds || targetIds.length === 0) continue;
+                  for (const targetId of targetIds) {
+                    result.edges.push({ source: fileNodeId, target: targetId, kind: 'references', provenance: 'heuristic', line: ref.line });
+                  }
+                }
+              }
+            }
+          }
+
+          // CSS Modules (shared between pool and serial JSX paths)
+          if (fileNodeId) {
             const cssModuleImports = findCSSModuleImports(source);
             for (const imp of cssModuleImports) {
               const cssModulePath = resolveCSSModulePath(this.projectRoot, path.join(this.projectRoot, filePath), imp.importPath);
@@ -448,7 +471,12 @@ export class CodeGraph {
             }
           }
         } else {
-          result = extractFromSource(filePath, source);
+          if (pool) {
+            const pr = await pool.requestParse({ type: 'style', filePath, content: source });
+            result = pr.result;
+          } else {
+            result = extractFromSource(filePath, source);
+          }
           fileNodeId = result.nodes.find(n => n.kind === 'file')?.id;
         }
 
@@ -520,6 +548,8 @@ export class CodeGraph {
     if (fileCountInBatch > 0) {
       this.db.getDb().exec('COMMIT');
     }
+
+    if (pool) await pool.shutdown();
 
     return {
       success: filesErrored === 0,
