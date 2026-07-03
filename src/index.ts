@@ -18,6 +18,7 @@ import { createContextBuilder, ContextBuilder } from './context';
 import { Mutex, FileLock } from './utils';
 import { FileWatcher, WatchOptions, PendingFile, LockUnavailableError } from './sync';
 import { getDefaultExcludes, loadProjectConfig } from './config';
+import { getGitVisibleFiles } from './extraction/git-scanner';
 import { deriveProjectNameTokens } from './search/query-utils';
 
 export * from './types';
@@ -194,50 +195,67 @@ export class CodeGraph {
   }
 
   private async scanAndIndex(options: IndexOptions): Promise<IndexResult> {
-    const { default: ignore } = await import('ignore');
-    const ig = ignore();
-
-    const gitignorePath = path.join(this.projectRoot, '.gitignore');
-    if (require('fs').existsSync(gitignorePath)) {
-      ig.add(require('fs').readFileSync(gitignorePath, 'utf-8'));
-    }
-    ig.add(['node_modules', 'dist', 'build', '.git', '.next', '.cssgraph', '.codegraph']);
-    ig.add(getDefaultExcludes());
-
     const projectConfig = loadProjectConfig(this.projectRoot);
-    if (projectConfig.exclude?.length) {
-      ig.add(projectConfig.exclude);
-    }
 
-    // Collect files into buckets in a single pass — no separate filter() passes.
+    // Collect files into buckets — git ls-files first, filesystem walk fallback.
     const styleFiles: string[] = [];
     const jsxFiles: string[] = [];
+    let fileCount = 0;
 
-    const scanFiles = (rootDir: string): void => {
-      const stack: string[] = [rootDir];
-      while (stack.length > 0) {
-        const dir = stack.pop()!;
-        const entries = require('fs').readdirSync(dir, { withFileTypes: true });
-        for (const entry of entries) {
-          const fullPath = path.join(dir, entry.name);
-          const relativePath = path.relative(this.projectRoot, fullPath).replace(/\\/g, '/');
-          if (ig.ignores(relativePath)) continue;
-          if (entry.isDirectory()) {
-            stack.push(fullPath);
-          } else if (entry.isFile()) {
-            const lang = detectLanguage(relativePath);
-            if (!isLanguageSupported(lang)) continue;
-            if (isJSXFile(relativePath)) {
-              jsxFiles.push(relativePath);
-            } else {
-              styleFiles.push(relativePath);
+    const gitFiles = getGitVisibleFiles(this.projectRoot);
+    if (gitFiles) {
+      for (const relativePath of gitFiles) {
+        const lang = detectLanguage(relativePath);
+        if (!isLanguageSupported(lang)) continue;
+        if (isJSXFile(relativePath)) {
+          if (!options.jsx) continue;
+          jsxFiles.push(relativePath);
+        } else {
+          styleFiles.push(relativePath);
+        }
+        fileCount++;
+      }
+    } else {
+      // Filesystem walk fallback (non-git project).
+      const { default: ignore } = await import('ignore');
+      const ig = ignore();
+      const gitignorePath = path.join(this.projectRoot, '.gitignore');
+      if (require('fs').existsSync(gitignorePath)) {
+        ig.add(require('fs').readFileSync(gitignorePath, 'utf-8'));
+      }
+      ig.add(['node_modules', 'dist', 'build', '.git', '.next', '.cssgraph', '.codegraph']);
+      ig.add(getDefaultExcludes());
+      if (projectConfig.exclude?.length) {
+        ig.add(projectConfig.exclude);
+      }
+
+      const scanFiles = (rootDir: string): void => {
+        const stack: string[] = [rootDir];
+        while (stack.length > 0) {
+          const dir = stack.pop()!;
+          const entries = require('fs').readdirSync(dir, { withFileTypes: true });
+          for (const entry of entries) {
+            const fullPath = path.join(dir, entry.name);
+            const relativePath = path.relative(this.projectRoot, fullPath).replace(/\\/g, '/');
+            if (ig.ignores(relativePath)) continue;
+            if (entry.isDirectory()) {
+              stack.push(fullPath);
+            } else if (entry.isFile()) {
+              const lang = detectLanguage(relativePath);
+              if (!isLanguageSupported(lang)) continue;
+              if (isJSXFile(relativePath)) {
+                if (!options.jsx) continue;
+                jsxFiles.push(relativePath);
+              } else {
+                styleFiles.push(relativePath);
+              }
             }
           }
         }
-      }
-    };
+      };
 
-    scanFiles(this.projectRoot);
+      scanFiles(this.projectRoot);
+    }
 
     // Style files must be indexed before JSX files so class selectors exist for references.
     const orderedFiles = options.jsx
@@ -246,6 +264,10 @@ export class CodeGraph {
 
     if (options.onProgress) {
       options.onProgress({ phase: 'scanning', current: orderedFiles.length, total: orderedFiles.length });
+      // Yield to the event loop so the progress bar renders before the blocking
+      // parse+insert loop starts (the shimmer library writes escape codes to
+      // stdout, which need a tick to flush).
+      await new Promise<void>(resolve => setImmediate(resolve));
     }
 
     let filesIndexed = 0;
@@ -286,7 +308,32 @@ export class CodeGraph {
       try {
         const fullPath = path.join(this.projectRoot, filePath);
         const source = require('fs').readFileSync(fullPath, 'utf-8');
+        const contentHash = require('crypto').createHash('sha256').update(source).digest('hex');
+
+        // Content-hash skip: unchanged files skip parse + DB write.
+        // Style files still need their class_selector nodes restored to the in-memory
+        // classSelectorMap so JSX references can be matched later.
         const isJsx = isJSXFile(filePath);
+        const existingFile = isJsx ? null : this.queries.getFileByPath(filePath);
+        if (existingFile && existingFile.contentHash === contentHash) {
+          if (!isJsx) {
+            const classNodes = this.queries.getNodesByFile(filePath, ['class_selector'] as import('./types').NodeKind[]);
+            for (const node of classNodes) {
+              if (node.name.startsWith('#')) continue;
+              const list = classSelectorMap.get(node.name) || [];
+              list.push(node.id);
+              classSelectorMap.set(node.name, list);
+            }
+          }
+          fileCountInBatch++; // count toward batch so we commit periodically even with skips
+          if (fileCountInBatch >= BATCH_SIZE) {
+            this.db.getDb().exec('COMMIT');
+            this.db.getDb().exec('BEGIN');
+            fileCountInBatch = 0;
+          }
+          filesSkipped++;
+          continue;
+        }
 
         let result: import('./types').ExtractionResult;
         let fileNodeId: string | undefined;
@@ -387,7 +434,7 @@ export class CodeGraph {
 
         const fileRecord: FileRecord = {
           path: filePath,
-          contentHash: require('crypto').createHash('sha256').update(source).digest('hex'),
+          contentHash,
           language: detectLanguage(filePath),
           size: source.length,
           modifiedAt: Date.now(),

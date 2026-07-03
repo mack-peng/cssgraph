@@ -118,7 +118,13 @@ export class QueryBuilder {
     return row ? this.rowToNode(row) : null;
   }
 
-  getNodesByFile(filePath: string): Node[] {
+  getNodesByFile(filePath: string, kinds?: NodeKind[]): Node[] {
+    if (kinds && kinds.length > 0) {
+      const placeholders = kinds.map(() => '?').join(',');
+      const sql = `SELECT * FROM nodes WHERE file_path = ? AND kind IN (${placeholders}) ORDER BY start_line`;
+      const rows = this.db.prepare(sql).all(filePath, ...kinds) as Record<string, unknown>[];
+      return rows.map(r => this.rowToNode(r));
+    }
     const rows = this.db.prepare('SELECT * FROM nodes WHERE file_path = ? ORDER BY start_line').all(filePath) as Record<string, unknown>[];
     return rows.map(r => this.rowToNode(r));
   }
