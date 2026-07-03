@@ -18,6 +18,7 @@ specificity, and callers grouped by file.
 - **cssgraph_callers** — find JSX components using a className
 - **cssgraph_impact** — blast radius of changing a className or property
 - **cssgraph_rule** — blast radius of a full CSS selector (exact, related, loose/strict impact)
+- **cssgraph_details** — quick O(1) exact selector lookup, no edges/impact (lightweight)
 - **cssgraph_unused** — find CSS class selectors with no incoming references
 - **cssgraph_cascade** — visualize the cascade path for a className
 - **cssgraph_property** — search selectors by CSS property value

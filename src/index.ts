@@ -2,13 +2,14 @@ import * as path from 'path';
 import {
   Node, Edge, FileRecord, Subgraph, TraversalOptions,
   SearchOptions, SearchResult, GraphStats, IndexProgress, IndexResult, SyncResult,
-  UnusedResult, CascadeResult, PropertySearchOptions, PropertySearchResult, RuleAnalysisResult,
+  UnusedResult, CascadeResult, PropertySearchOptions, PropertySearchResult, RuleAnalysisResult, RuleMatch,
 } from './types';
 import { DatabaseConnection, getDatabasePath } from './db';
 import { QueryBuilder } from './db/queries';
 import { isInitialized, createDirectory, removeDirectory, validateDirectory, getCodeGraphDir } from './directory';
 import { initGrammars, detectLanguage, isLanguageSupported, isJSXFile } from './extraction/grammars';
 import { GraphTraverser, GraphQueryManager } from './graph';
+export { normalizeSelector } from './graph';
 import { extractFromSource } from './extraction/postcss-extractor';
 import { extractCSSInJS } from './extraction/css-in-js-extractor';
 import { extractClassNameUsage } from './extraction/jsx-classname-extractor';
@@ -574,6 +575,10 @@ export class CodeGraph {
 
   analyzeRule(selector: string): RuleAnalysisResult {
     return this.graphQueries.analyzeRule(selector);
+  }
+
+  selectorDetails(selector: string): RuleMatch[] {
+    return this.graphQueries.getSelectorDetails(selector);
   }
 
   // ===========================================================================

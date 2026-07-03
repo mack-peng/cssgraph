@@ -292,6 +292,23 @@ export class MCPServer {
           cg.destroy();
         }
       }
+      case 'cssgraph_details': {
+        const selector = args['selector'] as string || '';
+        const { default: CodeGraph } = await import('../index');
+        const root = CodeGraph.isInitialized(cwd) ? cwd : (await this.findRoot(cwd));
+        if (!root) return 'cssgraph is not initialized.';
+        const cg = await CodeGraph.open(root);
+        try {
+          const matches = cg.selectorDetails(selector);
+          if (matches.length === 0) return `No exact match for "${selector}".`;
+          return matches.map(m =>
+            `${m.node.selector ?? m.node.name} — ${m.node.filePath}:${m.node.startLine}` +
+            (m.properties?.length ? ` (${m.properties.map(p => `${p.property}: ${p.value}`).join('; ')})` : '')
+          ).join('\n');
+        } finally {
+          cg.destroy();
+        }
+      }
       default:
         return `Unknown tool: ${name}`;
     }
@@ -364,6 +381,17 @@ export class MCPServer {
           type: 'object',
           properties: {
             selector: { type: 'string', description: 'Full CSS selector to analyze' },
+          },
+          required: ['selector'],
+        },
+      },
+      {
+        name: 'cssgraph_details',
+        description: 'Quick exact match: find files defining a specific CSS selector string.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            selector: { type: 'string', description: 'Full CSS selector string (exact match)' },
           },
           required: ['selector'],
         },

@@ -627,7 +627,7 @@ program
         if (options.json) {
           console.log(JSON.stringify(result, null, 2));
         } else {
-          console.log(`\n${bold('Rule:')} ${selector}\n`);
+          console.log(`\n${bold('Rule:')} ${result.selector}\n`);
 
           if (result.classes.length > 0) {
             console.log(`${bold('Classes:')} ${result.classes.map(c => `.${c}`).join(' ')}`);
@@ -641,7 +641,7 @@ program
           console.log('');
 
           if (result.exactMatches.length === 0) {
-            console.log(`${bold('Exact matches:')} (none)\n`);
+            console.log(`${bold('Exact matches:')} ${dim('(none) — no selector matched exactly')}\n`);
           } else {
             console.log(`${bold('Exact matches:')}`);
             for (const m of result.exactMatches) {
@@ -653,7 +653,12 @@ program
           if (result.containsMatches.length === 0) {
             console.log(`${bold('Related selectors:')} (none)\n`);
           } else {
-            console.log(`${bold('Related selectors:')}`);
+            if (result.exactMatches.length === 0) {
+              console.log(`${dim('Falling back to contains search.')}`);
+              console.log(`${bold('Related selectors:')}`);
+            } else {
+              console.log(`${bold('Related selectors:')}`);
+            }
             for (const m of result.containsMatches) {
               console.log(`  ${m.node.selector ?? m.node.name}  ${dim(`${m.node.filePath}:${m.node.startLine}`)}`);
             }
@@ -688,6 +693,63 @@ program
         cg.destroy();
       } catch (err) {
         console.error(`rule analysis failed: ${err instanceof Error ? err.message : String(err)}`);
+        process.exit(1);
+      }
+    });
+
+  /**
+   * cssgraph details <selector>
+   */
+  program
+    .command('details <selector>')
+    .description('Quick lookup: find files defining a CSS selector (exact match only)')
+    .option('-p, --path <path>', 'Project path')
+    .option('--json', 'Output as JSON')
+    .action(async (selector: string, options: { path?: string; json?: boolean }) => {
+      const projectPath = resolveProjectPath(options.path);
+
+      if (!isInitialized(projectPath)) {
+        console.error(`Not initialized in ${projectPath}. Run "cssgraph init" first.`);
+        process.exit(1);
+      }
+
+      try {
+        const { default: CodeGraph, normalizeSelector } = await import('../index');
+        const cg = await CodeGraph.open(projectPath);
+        const matches = cg.selectorDetails(selector);
+        const normalized = normalizeSelector(selector);
+
+        if (options.json) {
+          console.log(JSON.stringify(matches.map(m => ({
+            selector: m.node.selector,
+            name: m.node.name,
+            filePath: m.node.filePath,
+            line: m.node.startLine,
+            specificity: m.node.specificity,
+            properties: m.properties,
+          })), null, 2));
+        } else {
+          if (matches.length === 0) {
+            console.log(`${dim('No exact match found.')} Use ${bold('cssgraph rule')} "${normalized}" for related search.`);
+          } else {
+            console.log(`\n${matches.length} match(es) for ${bold(normalized)}:\n`);
+            for (const m of matches) {
+              console.log(`  ${m.node.selector ?? m.node.name}  ${dim(`${m.node.filePath}:${m.node.startLine}`)}`);
+              if (m.properties && m.properties.length > 0) {
+                for (const p of m.properties.slice(0, 8)) {
+                  console.log(`    ${p.property}: ${p.value}`);
+                }
+                if (m.properties.length > 8) {
+                  console.log(`    ${dim(`... and ${m.properties.length - 8} more properties`)}`);
+                }
+              }
+            }
+          }
+        }
+
+        cg.destroy();
+      } catch (err) {
+        console.error(`details lookup failed: ${err instanceof Error ? err.message : String(err)}`);
         process.exit(1);
       }
     });

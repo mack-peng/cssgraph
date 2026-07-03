@@ -1,12 +1,16 @@
 import { QueryBuilder } from '../db/queries';
 import {
   Node, Context, UnusedResult, CascadeResult, CascadeStep,
-  PropertySearchOptions, PropertySearchResult, RuleAnalysisResult,
+  PropertySearchOptions, PropertySearchResult, RuleAnalysisResult, RuleMatch,
 } from '../types';
 import { GraphTraverser } from './traversal';
 import selectorParser from 'postcss-selector-parser';
 
 export { GraphTraverser } from './traversal';
+
+export function normalizeSelector(selector: string): string {
+  return selector.trim().replace(/\s+/g, ' ');
+}
 
 export class GraphQueryManager {
   private queries: QueryBuilder;
@@ -124,7 +128,8 @@ export class GraphQueryManager {
     });
   }
 
-  analyzeRule(selector: string): RuleAnalysisResult {
+  analyzeRule(rawSelector: string): RuleAnalysisResult {
+    const selector = normalizeSelector(rawSelector);
     const parsed = parseSelector(selector);
 
     const makeKey = (n: Node) => `${n.filePath}:${n.startLine}:${n.selector ?? n.name}`;
@@ -199,6 +204,23 @@ export class GraphQueryManager {
       looseFiles: Array.from(allFiles).sort(),
       strictFiles: Array.from(intersection).sort(),
     };
+  }
+
+  getSelectorDetails(rawSelector: string): RuleMatch[] {
+    const selector = normalizeSelector(rawSelector);
+    const nodes = this.queries.getClassSelectorsBySelector(selector);
+    const seen = new Set<string>();
+    const results: RuleMatch[] = [];
+    for (const n of nodes) {
+      const key = `${n.filePath}:${n.startLine}:${n.selector ?? n.name}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      results.push({
+        node: n,
+        properties: n.properties ?? this.getPropertiesForNode(n.id),
+      });
+    }
+    return results;
   }
 
   private getPropertiesForNode(nodeId: string): Array<{ property: string; value: string }> {
