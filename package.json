@@ -25,12 +25,25 @@
     "css",
     "scss",
     "less",
+    "sass",
+    "postcss",
+    "tailwind",
+    "css-in-js",
     "knowledge-graph",
     "code-intelligence",
+    "agent",
     "mcp"
   ],
-  "author": "",
+  "author": "orangemust",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mack-peng/cssgraph.git"
+  },
+  "bugs": {
+    "url": "https://github.com/mack-peng/cssgraph/issues"
+  },
+  "homepage": "https://github.com/mack-peng/cssgraph#readme",
   "dependencies": {
     "commander": "^14.0.2",
     "ignore": "^7.0.5",
