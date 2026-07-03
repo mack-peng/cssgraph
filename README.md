@@ -23,39 +23,57 @@ When an AI agent needs to understand CSS — where is `.btn-primary` defined, wh
 
 **cssgraph hands the agent the exact style context it needs in one call.** It's a pre-built knowledge graph of every className, CSS property, variable, and at-rule in your stylesheets — so instead of crawling files, the agent asks one question and gets back the properties, overrides, specificity, callers, and file-level impact in full.
 
-## Get Started
+---
 
-### 1. Install
+## Installation
+
+### For Humans
+
+Copy and paste this prompt to your LLM agent (Claude Code, Cursor, Codex, etc.):
+
+```text
+Install and configure cssgraph by following the instructions here:
+https://raw.githubusercontent.com/mack-peng/cssgraph/main/docs/guide/installation.md
+```
+
+Or read the [Installation Guide](docs/guide/installation.md), but seriously, let an agent do it. Humans fat-finger configs.
+
+### For LLM Agents
+
+Fetch the installation guide and follow it:
+
+```bash
+curl -s https://raw.githubusercontent.com/mack-peng/cssgraph/main/docs/guide/installation.md
+```
+
+---
+
+## Quick Start
+
+### 1. Initialize
 
 ```bash
 npm i -g cssgraph
-```
-
-Requires Node.js >= 22.5.0 (for built-in `node:sqlite`).
-
-### 2. Initialize each project
-
-```bash
 cd your-project
 cssgraph init --jsx
 ```
 
-This indexes all style files (CSS, SCSS, Less, Sass, PostCSS) **plus** JSX/TSX
-className references, CSS-in-JS, and CSS Modules — enabling every MCP tool
-including `cssgraph_callers`, `cssgraph_rule`, and `cssgraph_impact_selector`.
+Indexes all style files (CSS, SCSS, Less, Sass) **plus** JSX/TSX className
+references, CSS-in-JS, and CSS Modules — enabling every MCP tool.
 
-Just style files? Skip `--jsx` for a faster ~45s index. You can always
-add JSX references later with `cssgraph index --jsx`.
+Just style files? Skip `--jsx` for ~45s. Add JSX later with `cssgraph index --jsx`.
 
-### 3. Add to your agent (MCP)
+Requires Node.js >= 22.5.0 (for `node:sqlite`).
+
+### 2. Wire up your agent
 
 ```bash
 cssgraph install
 ```
 
-Auto-detects and configures opencode, Claude Code, Cursor, Codex CLI, Gemini CLI, and Kiro.
+Auto-detects opencode, Claude Code, Cursor, Codex CLI, Gemini CLI, and Kiro.
 
-Or add manually:
+Or add to any MCP agent manually:
 
 ```json
 {
@@ -69,9 +87,9 @@ Or add manually:
 }
 ```
 
-### 4. No more syncing
+### 3. No more syncing
 
-Auto-sync is enabled by default. cssgraph watches the project and updates the graph on every file change — while your agent edits code, or you add/modify/delete CSS files. **The index is never stale.**
+Auto-sync is enabled by default. The MCP server watches your project and updates the graph on every file change — while your agent edits code, or you add/modify/delete CSS files. **The index is never stale.**
 
 ---
 

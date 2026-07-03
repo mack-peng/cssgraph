@@ -1,5 +1,12 @@
 # Installation
 
+This guide is designed for both human readers and AI coding agents.
+LLM agents can fetch and follow it directly:
+
+```bash
+curl -s https://raw.githubusercontent.com/mack-peng/cssgraph/main/docs/guide/installation.md
+```
+
 ## Requirements
 
 - **Node.js >= 22.5.0** — cssgraph uses Node's built-in `node:sqlite` module. Check your version with `node --version`.
