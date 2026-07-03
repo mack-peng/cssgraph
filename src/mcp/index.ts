@@ -309,6 +309,41 @@ export class MCPServer {
           cg.destroy();
         }
       }
+      case 'cssgraph_impact_selector': {
+        const selector = args['selector'] as string || '';
+        const { default: CodeGraph } = await import('../index');
+        const root = CodeGraph.isInitialized(cwd) ? cwd : (await this.findRoot(cwd));
+        if (!root) return 'cssgraph is not initialized.';
+        const cg = await CodeGraph.open(root);
+        try {
+          const impact = cg.selectorImpact(selector);
+          const lines: string[] = [`Selector: ${impact.selector}\n`];
+
+          if (impact.definition.length > 0) {
+            lines.push('Definition:');
+            for (const d of impact.definition) {
+              lines.push(`  ${d.filePath}:${d.line}  ${d.selector}`);
+            }
+            lines.push('');
+          }
+
+          if (impact.strict.length > 0) {
+            lines.push(`Strict impact (all classes): ${impact.strict.length} file(s)`);
+            for (const f of impact.strict.slice(0, 20)) lines.push(`  ${f}`);
+            if (impact.strict.length > 20) lines.push(`  ... and ${impact.strict.length - 20} more`);
+          }
+
+          if (impact.loose.length > impact.strict.length) {
+            lines.push(`\nLoose impact (any class): ${impact.loose.length} file(s)`);
+            for (const f of impact.loose.slice(0, 20)) lines.push(`  ${f}`);
+            if (impact.loose.length > 20) lines.push(`  ... and ${impact.loose.length - 20} more`);
+          }
+
+          return lines.join('\n');
+        } finally {
+          cg.destroy();
+        }
+      }
       default:
         return `Unknown tool: ${name}`;
     }
@@ -392,6 +427,17 @@ export class MCPServer {
           type: 'object',
           properties: {
             selector: { type: 'string', description: 'Full CSS selector string (exact match)' },
+          },
+          required: ['selector'],
+        },
+      },
+      {
+        name: 'cssgraph_impact_selector',
+        description: 'Find code files (JS/TS/JSX/TSX/es6) affected by a CSS selector — strict (all classes) and loose (any class) impact.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            selector: { type: 'string', description: 'Full CSS selector to analyze' },
           },
           required: ['selector'],
         },

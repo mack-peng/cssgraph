@@ -8,6 +8,14 @@ import selectorParser from 'postcss-selector-parser';
 
 export { GraphTraverser } from './traversal';
 
+export interface SelectorImpactResult {
+  selector: string;
+  classes: string[];
+  definition: Array<{ filePath: string; line: number; selector: string }>;
+  strict: string[];
+  loose: string[];
+}
+
 export function normalizeSelector(selector: string): string {
   return selector.trim().replace(/\s+/g, ' ');
 }
@@ -234,6 +242,32 @@ export class GraphQueryManager {
       }
     }
     return props;
+  }
+
+  selectorImpact(rawSelector: string): SelectorImpactResult {
+    const analysis = this.analyzeRule(rawSelector);
+
+    const isCodeFile = (f: string) => {
+      const ext = f.split('.').pop()?.toLowerCase();
+      return ext === 'js' || ext === 'jsx' || ext === 'ts' || ext === 'tsx' || ext === 'es6';
+    };
+
+    const strict = analysis.strictFiles.filter(isCodeFile);
+    const loose = analysis.looseFiles.filter(isCodeFile);
+
+    const definition = analysis.exactMatches.map(m => ({
+      filePath: m.node.filePath,
+      line: m.node.startLine,
+      selector: m.node.selector ?? analysis.selector,
+    }));
+
+    return {
+      selector: analysis.selector,
+      classes: analysis.classes,
+      definition,
+      strict,
+      loose,
+    };
   }
 
   getNodeMetrics(nodeId: string): {

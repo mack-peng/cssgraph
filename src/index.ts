@@ -9,8 +9,9 @@ import { DatabaseConnection, getDatabasePath } from './db';
 import { QueryBuilder } from './db/queries';
 import { isInitialized, createDirectory, removeDirectory, validateDirectory, getCodeGraphDir } from './directory';
 import { initGrammars, detectLanguage, isLanguageSupported, isJSXFile } from './extraction/grammars';
-import { GraphTraverser, GraphQueryManager } from './graph';
+import { GraphTraverser, GraphQueryManager, SelectorImpactResult } from './graph';
 export { normalizeSelector } from './graph';
+export type { SelectorImpactResult } from './graph';
 import { extractFromSource } from './extraction/postcss-extractor';
 import { extractCSSInJS } from './extraction/css-in-js-extractor';
 import { extractClassNameUsage } from './extraction/jsx-classname-extractor';
@@ -718,6 +719,10 @@ export class CodeGraph {
 
   selectorDetails(selector: string): RuleMatch[] {
     return this.graphQueries.getSelectorDetails(selector);
+  }
+
+  selectorImpact(selector: string): SelectorImpactResult {
+    return this.graphQueries.selectorImpact(selector);
   }
 
   // ===========================================================================

@@ -757,6 +757,66 @@ program
     });
 
   /**
+   * cssgraph impact-selector <selector>
+   */
+  program
+    .command('impact-selector <selector>')
+    .description('Find code files (JS/TS/JSX/TSX/es6) affected by a CSS selector')
+    .option('-p, --path <path>', 'Project path')
+    .option('--loose', 'Show files using any class (default: strict — only files using ALL classes)')
+    .option('--json', 'Output as JSON')
+    .action(async (selector: string, options: { path?: string; loose?: boolean; json?: boolean }) => {
+      const projectPath = resolveProjectPath(options.path);
+
+      if (!isInitialized(projectPath)) {
+        console.error(`Not initialized in ${projectPath}. Run "cssgraph init" first.`);
+        process.exit(1);
+      }
+
+      try {
+        const { default: CodeGraph } = await import('../index');
+        const cg = await CodeGraph.open(projectPath);
+        const impact = cg.selectorImpact(selector);
+
+        if (options.json) {
+          console.log(JSON.stringify(impact, null, 2));
+        } else {
+          console.log(`\n${bold('Selector:')} ${impact.selector}`);
+          console.log(`${bold('Classes:')}  ${impact.classes.map(c => `.${c}`).join(' ')}\n`);
+
+          if (impact.definition.length === 0) {
+            console.log(`${bold('Definition:')} ${dim('(not found)')}`);
+          } else {
+            console.log(`${bold('Definition:')}`);
+            for (const d of impact.definition) {
+              console.log(`  ${dim(`${d.filePath}:${d.line}`)}  ${d.selector}`);
+            }
+          }
+          console.log('');
+
+          const files = options.loose ? impact.loose : impact.strict;
+          const label = options.loose ? 'Affected (loose — any class used)' : 'Affected (strict — all classes used)';
+          if (files.length === 0) {
+            console.log(`${bold(label)}: ${dim('(none)')}`);
+            if (!options.loose && impact.loose.length > 0) {
+              console.log(`${dim(`  Use --loose to see ${impact.loose.length} file(s) using any class.`)}`);
+            }
+          } else {
+            console.log(`${bold(label)}: ${files.length} file(s)`);
+            for (const f of files) {
+              console.log(`  ${f}`);
+            }
+          }
+        }
+
+        cg.destroy();
+      } catch (err) {
+        console.error(`impact-selector failed: ${err instanceof Error ? err.message : String(err)}`);
+        process.exit(1);
+      }
+    });
+
+  /**
    * codegraph files
    */
   program
