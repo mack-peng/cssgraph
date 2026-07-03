@@ -112,6 +112,7 @@ cssgraph query <className>           # Search for className selectors
 cssgraph explore <query...>          # Full style context for a className
 cssgraph details <selector>          # O(1) exact selector → file:line lookup
 cssgraph rule <selector> [--strict]  # Selector impact: exact + loose/strict files
+cssgraph impact-selector <selector> # Code files affected by a selector
 cssgraph impact <className>          # Blast radius of changing a className
 cssgraph unused                      # Find unreferenced class selectors
 cssgraph cascade <className>         # Visualize cascade path
@@ -143,6 +144,7 @@ Without `--jsx`, cssgraph indexes style files only (CSS, SCSS, Less, Sass). This
 | `cssgraph_callers` | Find JSX components referencing a className |
 | `cssgraph_impact` | Blast radius of changing a className |
 | `cssgraph_rule` | Blast radius of a full CSS selector (exact match + loose/strict file impact) |
+| `cssgraph_impact_selector` | Find code files (JS/TS/JSX/TSX) affected by a CSS selector |
 | `cssgraph_details` | O(1) exact selector lookup (no edges, lightweight) |
 | `cssgraph_unused` | Find class selectors with no incoming references |
 | `cssgraph_cascade` | Visualize the cascade path for a className |

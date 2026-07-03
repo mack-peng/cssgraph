@@ -79,7 +79,7 @@ Add to your MCP config file:
 
 ## 3. Restart your agent
 
-Restart your agent for the MCP server to load. Once restarted, the agent will see 11 MCP tools: `cssgraph_explore`, `cssgraph_search`, `cssgraph_callers`, `cssgraph_impact`, `cssgraph_rule`, `cssgraph_details`, `cssgraph_unused`, `cssgraph_cascade`, `cssgraph_property`, `cssgraph_files`, and `cssgraph_status`.
+Restart your agent for the MCP server to load. Once restarted, the agent will see 12 MCP tools: `cssgraph_explore`, `cssgraph_search`, `cssgraph_callers`, `cssgraph_impact`, `cssgraph_rule`, `cssgraph_impact_selector`, `cssgraph_details`, `cssgraph_unused`, `cssgraph_cascade`, `cssgraph_property`, `cssgraph_files`, and `cssgraph_status`.
 
 ## 4. Initialize each project
 

@@ -54,7 +54,7 @@ files       → PostCSS / CSS-in-JS / JSX extractors
 - `src/context/` — `ContextBuilder` for markdown output.
 - `src/sync/` — `FileWatcher` (native FS events) with debounce + filter.
 - `src/mcp/` — MCP server with 12 tools (see below). Server instructions in `src/mcp/server-instructions.ts`.
-- `src/bin/cssgraph.ts` — CLI (commander). Subcommands: `init`, `index`, `query`, `explore`, `impact`, `rule`, `details`, `unused`, `cascade`, `property`, `files`, `status`, `sync`, `serve --mcp`, `install`, `uninstall`.
+- `src/bin/cssgraph.ts` — CLI (commander). Subcommands: `init`, `index`, `query`, `explore`, `impact`, `impact-selector`, `rule`, `details`, `unused`, `cascade`, `property`, `files`, `status`, `sync`, `serve --mcp`, `install`, `uninstall`.
 - `src/config.ts` — mtime-cached `.cssgraph.json` project config loader.
 
 ### NodeKind / EdgeKind
@@ -84,6 +84,7 @@ files       → PostCSS / CSS-in-JS / JSX extractors
 | `cssgraph_callers` | Find JSX components referencing a className |
 | `cssgraph_impact` | Blast radius of changing a className |
 | `cssgraph_rule` | Blast radius of a full CSS selector (exact + loose/strict impact) |
+| `cssgraph_impact_selector` | Find code files (JS/TS/JSX/TSX) affected by a CSS selector |
 | `cssgraph_details` | Quick O(1) exact selector lookup (no edges query) |
 | `cssgraph_unused` | Find class selectors with no incoming references |
 | `cssgraph_cascade` | Visualize the cascade path for a className |
