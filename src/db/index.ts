@@ -63,6 +63,20 @@ export class DatabaseConnection {
     return this.db;
   }
 
+  setIndexMode(): void {
+    try {
+      this.db.exec('PRAGMA journal_mode=WAL');
+      this.db.exec('PRAGMA synchronous=OFF');
+      this.db.exec('PRAGMA cache_size=-500000');
+    } catch { /* best effort */ }
+  }
+
+  restoreNormalMode(): void {
+    try {
+      this.db.exec('PRAGMA synchronous=NORMAL');
+    } catch { /* best effort */ }
+  }
+
   getPath(): string {
     return this.dbPath;
   }

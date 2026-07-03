@@ -17,6 +17,7 @@ import { findCSSModuleImports, extractCSSModuleUsage, resolveCSSModulePath } fro
 import { createContextBuilder, ContextBuilder } from './context';
 import { Mutex, FileLock } from './utils';
 import { FileWatcher, WatchOptions, PendingFile, LockUnavailableError } from './sync';
+import { getDefaultExcludes, loadProjectConfig } from './config';
 import { deriveProjectNameTokens } from './search/query-utils';
 
 export * from './types';
@@ -181,10 +182,12 @@ export class CodeGraph {
 
       try {
         const startTime = Date.now();
+        this.db.setIndexMode();
         const result = await this.scanAndIndex(options);
         result.durationMs = Date.now() - startTime;
         return result;
       } finally {
+        this.db.restoreNormalMode();
         this.fileLock.release();
       }
     });
@@ -199,6 +202,12 @@ export class CodeGraph {
       ig.add(require('fs').readFileSync(gitignorePath, 'utf-8'));
     }
     ig.add(['node_modules', 'dist', 'build', '.git', '.next', '.cssgraph', '.codegraph']);
+    ig.add(getDefaultExcludes());
+
+    const projectConfig = loadProjectConfig(this.projectRoot);
+    if (projectConfig.exclude?.length) {
+      ig.add(projectConfig.exclude);
+    }
 
     // Collect files into buckets in a single pass — no separate filter() passes.
     const styleFiles: string[] = [];
@@ -260,6 +269,11 @@ export class CodeGraph {
         source.indexOf('.module.') !== -1 ||
         source.indexOf('styled') !== -1;
     };
+
+    const BATCH_SIZE = 100;
+
+    this.db.getDb().exec('BEGIN');
+    let fileCountInBatch = 0;
 
     for (let i = 0; i < orderedFiles.length; i++) {
       const filePath = orderedFiles[i]!;
@@ -355,7 +369,7 @@ export class CodeGraph {
           continue;
         }
 
-        this.db.getDb().exec('BEGIN');
+        this.db.getDb().exec('SAVEPOINT sp');
 
         for (const node of result.nodes) {
           this.queries.insertNode(node);
@@ -383,11 +397,19 @@ export class CodeGraph {
         };
         this.queries.insertFile(fileRecord);
 
-        this.db.getDb().exec('COMMIT');
+        this.db.getDb().exec('RELEASE sp');
 
         filesIndexed++;
         if (result.errors.length > 0) allErrors.push(...result.errors);
+
+        fileCountInBatch++;
+        if (fileCountInBatch >= BATCH_SIZE) {
+          this.db.getDb().exec('COMMIT');
+          this.db.getDb().exec('BEGIN');
+          fileCountInBatch = 0;
+        }
       } catch (err) {
+        try { this.db.getDb().exec('ROLLBACK TO sp'); } catch { /* not in SAVEPOINT */ }
         filesErrored++;
         allErrors.push({
           message: err instanceof Error ? err.message : String(err),
@@ -396,6 +418,10 @@ export class CodeGraph {
           code: 'parse_error',
         });
       }
+    }
+
+    if (fileCountInBatch > 0) {
+      this.db.getDb().exec('COMMIT');
     }
 
     return {
