@@ -121,13 +121,15 @@ export function extractFromSource(filePath: string, source: string): ExtractionR
       filePath,
       language,
       startLine: 1,
-      endLine: source.split('\n').length,
+      endLine: countLines(source),
       startColumn: 0,
       endColumn: 0,
       updatedAt: Date.now(),
     });
 
     const allSelectorNodes: Node[] = [];
+    const varIdMap = new Map<string, string>();
+    const selectorNodeMap = new Map<string, Node[]>();
 
     const walkRules = (
       children: ChildNode[],
@@ -247,6 +249,10 @@ export function extractFromSource(filePath: string, source: string): ExtractionR
         nodes.push(node);
         allSelectorNodes.push(node);
 
+        const selList = selectorNodeMap.get(fullSelector) || [];
+        selList.push(node);
+        selectorNodeMap.set(fullSelector, selList);
+
         edges.push({
           source: fileNodeId,
           target: selectorNodeId,
@@ -287,7 +293,7 @@ export function extractFromSource(filePath: string, source: string): ExtractionR
         }
 
         for (const vref of varRefs) {
-          const varNodeId = sourceVarNodeId(vref.name, nodes);
+          const varNodeId = varIdMap.get(vref.name);
           if (varNodeId) {
             edges.push({
               source: selectorNodeId,
@@ -317,6 +323,11 @@ export function extractFromSource(filePath: string, source: string): ExtractionR
           selector: fullSelector,
           updatedAt: Date.now(),
         });
+
+        const selList2 = selectorNodeMap.get(fullSelector) || [];
+        selList2.push(nodes[nodes.length - 1]!);
+        selectorNodeMap.set(fullSelector, selList2);
+
         edges.push({ source: fileNodeId, target: idNodeId, kind: 'contains', provenance: 'postcss' });
 
         for (const decl of declarations) {
@@ -343,7 +354,7 @@ export function extractFromSource(filePath: string, source: string): ExtractionR
 
       for (const varDecl of variables) {
         const varNodeId = hashId(`${filePath}:${varDecl.name}`);
-        if (!nodes.some(n => n.id === varNodeId)) {
+        if (!varIdMap.has(varDecl.name)) {
           nodes.push({
             id: varNodeId,
             kind: 'css_variable',
@@ -358,6 +369,7 @@ export function extractFromSource(filePath: string, source: string): ExtractionR
             value: varDecl.value,
             updatedAt: Date.now(),
           });
+          varIdMap.set(varDecl.name, varNodeId);
         }
       }
 
@@ -371,7 +383,7 @@ export function extractFromSource(filePath: string, source: string): ExtractionR
 
       if (nestedRules.length > 0) {
         for (const nested of nestedRules) {
-          const parentNodes = nodes.filter(n => n.selector === fullSelector);
+          const parentNodes = selectorNodeMap.get(fullSelector) || [];
 
           walkRules([nested], {
             parentSelectors: rule.selectors,
@@ -382,7 +394,7 @@ export function extractFromSource(filePath: string, source: string): ExtractionR
             parentSelectors: rule.selectors,
             atRules: context.atRules,
           });
-          const childNodes = nodes.filter(n => n.selector === childSelector);
+          const childNodes = selectorNodeMap.get(childSelector) || [];
 
           for (const pn of parentNodes) {
             for (const cn of childNodes) {
@@ -468,9 +480,12 @@ export function extractFromSource(filePath: string, source: string): ExtractionR
   return { nodes, edges, errors, durationMs: 0 };
 }
 
-function sourceVarNodeId(varName: string, nodes: Node[]): string | null {
-  const found = nodes.find(n => n.kind === 'css_variable' && n.name === varName);
-  return found ? found.id : null;
+function countLines(source: string): number {
+  let count = 1;
+  for (let i = 0; i < source.length; i++) {
+    if (source.charCodeAt(i) === 10) count++;
+  }
+  return count;
 }
 
 function cmpSpecificity(a: [number, number, number, number], b: [number, number, number, number]): number {
