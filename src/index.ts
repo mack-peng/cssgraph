@@ -22,6 +22,7 @@ import { FileWatcher, WatchOptions, PendingFile, LockUnavailableError } from './
 import { getDefaultExcludes, loadProjectConfig } from './config';
 import { getGitVisibleFiles } from './extraction/git-scanner';
 import { ParseWorkerPool, resolveParsePoolSize } from './extraction/parse-pool';
+import { loadCSSModuleHashMap } from './extraction/css-modules-resolver';
 import { deriveProjectNameTokens } from './search/query-utils';
 
 export * from './types';
@@ -61,6 +62,7 @@ export class CodeGraph {
   private indexMutex = new Mutex();
   private fileLock: FileLock;
   private watcher: FileWatcher | null = null;
+  private moduleHashMap = new Map<string, string>();
 
   private constructor(db: DatabaseConnection, queries: QueryBuilder, projectRoot: string) {
     this.db = db;
@@ -551,6 +553,19 @@ export class CodeGraph {
 
     if (pool) await pool.shutdown();
 
+    // Build CSS Modules hash→original map from source maps of .module.css files.
+    for (const filePath of styleFiles) {
+      if (filePath.includes('.module.')) {
+        const fullPath = path.join(this.projectRoot, filePath);
+        const hashMap = loadCSSModuleHashMap(fullPath);
+        if (hashMap) {
+          for (const [hashed, original] of hashMap) {
+            this.moduleHashMap.set(hashed, original);
+          }
+        }
+      }
+    }
+
     return {
       success: filesErrored === 0,
       filesIndexed,
@@ -744,15 +759,15 @@ export class CodeGraph {
   }
 
   analyzeRule(selector: string): RuleAnalysisResult {
-    return this.graphQueries.analyzeRule(selector);
+    return this.graphQueries.analyzeRule(selector, this.moduleHashMap);
   }
 
   selectorDetails(selector: string): RuleMatch[] {
-    return this.graphQueries.getSelectorDetails(selector);
+    return this.graphQueries.getSelectorDetails(selector, this.moduleHashMap);
   }
 
   selectorImpact(selector: string): SelectorImpactResult {
-    return this.graphQueries.selectorImpact(selector);
+    return this.graphQueries.selectorImpact(selector, this.moduleHashMap);
   }
 
   // ===========================================================================

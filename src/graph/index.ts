@@ -20,6 +20,22 @@ export function normalizeSelector(selector: string): string {
   return selector.trim().replace(/\s+/g, ' ');
 }
 
+/** Replace hashed CSS Module class names with original names using the hash map. */
+export function resolveHashedSelector(selector: string, hashMap?: Map<string, string>): string {
+  if (!hashMap || hashMap.size === 0) return selector;
+  let result = selector;
+  for (const [hashed, original] of hashMap) {
+    if (hashed !== original) {
+      result = result.replace(new RegExp(`\\.${escapeRegex(hashed)}\\b`, 'g'), `.${original}`);
+    }
+  }
+  return result;
+}
+
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 export class GraphQueryManager {
   private queries: QueryBuilder;
   private traverser: GraphTraverser;
@@ -136,8 +152,8 @@ export class GraphQueryManager {
     });
   }
 
-  analyzeRule(rawSelector: string): RuleAnalysisResult {
-    const selector = normalizeSelector(rawSelector);
+  analyzeRule(rawSelector: string, hashMap?: Map<string, string>): RuleAnalysisResult {
+    const selector = normalizeSelector(resolveHashedSelector(rawSelector, hashMap));
     const parsed = parseSelector(selector);
 
     const makeKey = (n: Node) => `${n.filePath}:${n.startLine}:${n.selector ?? n.name}`;
@@ -214,8 +230,8 @@ export class GraphQueryManager {
     };
   }
 
-  getSelectorDetails(rawSelector: string): RuleMatch[] {
-    const selector = normalizeSelector(rawSelector);
+  getSelectorDetails(rawSelector: string, hashMap?: Map<string, string>): RuleMatch[] {
+    const selector = normalizeSelector(resolveHashedSelector(rawSelector, hashMap));
     const nodes = this.queries.getClassSelectorsBySelector(selector);
     const seen = new Set<string>();
     const results: RuleMatch[] = [];
@@ -244,8 +260,8 @@ export class GraphQueryManager {
     return props;
   }
 
-  selectorImpact(rawSelector: string): SelectorImpactResult {
-    const analysis = this.analyzeRule(rawSelector);
+  selectorImpact(rawSelector: string, hashMap?: Map<string, string>): SelectorImpactResult {
+    const analysis = this.analyzeRule(rawSelector, hashMap);
 
     const isCodeFile = (f: string) => {
       const ext = f.split('.').pop()?.toLowerCase();

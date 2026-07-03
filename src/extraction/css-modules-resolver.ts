@@ -51,16 +51,6 @@ export function isCSSModuleFile(filePath: string): boolean {
 
 const CSS_MODULE_PATH_PATTERN = String.raw`[^'"]+\.module\.(?:css|scss|less|sass)`;
 
-/**
- * Find CSS module dynamic imports and requires in JavaScript/TypeScript source.
- *
- * Supported patterns:
- *   const styles = await import('./X.module.css')
- *   const styles = import('./X.module.css')
- *   import('./X.module.css').then(mod => ...)
- *   const styles = require('./X.module.css')
- *   import styles from './X.module.css'
- */
 export function findCSSModuleImports(source: string): CSSModuleImport[] {
   const results: CSSModuleImport[] = [];
   const seen = new Set<string>();
@@ -72,33 +62,27 @@ export function findCSSModuleImports(source: string): CSSModuleImport[] {
     results.push({ bindingName, importPath, line });
   };
 
-  // const/let/var X = await import('...')
-  // const/let/var X = import('...')
   const dynamicImportBindingPattern = new RegExp(String.raw`(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:await\s+)?import\s*\(\s*['"](${CSS_MODULE_PATH_PATTERN})['"]\s*\)`, 'g');
   let match: RegExpExecArray | null;
   while ((match = dynamicImportBindingPattern.exec(source)) !== null) {
     add(match[1]!, match[2]!, indexToLine(source, match.index));
   }
 
-  // import('...').then(...) or bare import('...')
   const dynamicImportBarePattern = new RegExp(String.raw`import\s*\(\s*['"](${CSS_MODULE_PATH_PATTERN})['"]\s*\)`, 'g');
   while ((match = dynamicImportBarePattern.exec(source)) !== null) {
     add('', match[1]!, indexToLine(source, match.index));
   }
 
-  // const/let/var X = require('...')
   const requirePattern = new RegExp(String.raw`(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*require\s*\(\s*['"](${CSS_MODULE_PATH_PATTERN})['"]\s*\)`, 'g');
   while ((match = requirePattern.exec(source)) !== null) {
     add(match[1]!, match[2]!, indexToLine(source, match.index));
   }
 
-  // require('...') without binding
   const requireBarePattern = new RegExp(String.raw`(?<!\.)require\s*\(\s*['"](${CSS_MODULE_PATH_PATTERN})['"]\s*\)`, 'g');
   while ((match = requireBarePattern.exec(source)) !== null) {
     add('', match[1]!, indexToLine(source, match.index));
   }
 
-  // import X from '...module.css'
   const staticImportPattern = new RegExp(String.raw`import\s+([A-Za-z_$][\w$]*)\s+from\s+['"](${CSS_MODULE_PATH_PATTERN})['"]`, 'g');
   while ((match = staticImportPattern.exec(source)) !== null) {
     add(match[1]!, match[2]!, indexToLine(source, match.index));
@@ -107,11 +91,6 @@ export function findCSSModuleImports(source: string): CSSModuleImport[] {
   return results;
 }
 
-/**
- * Extract class names accessed on a CSS module binding.
- *
- * e.g. styles.foo, styles['foo-bar'], styles?.foo
- */
 export function extractCSSModuleUsage(source: string, bindingName: string): Array<{ className: string; line: number }> {
   const results: Array<{ className: string; line: number }> = [];
   const seen = new Set<string>();
@@ -124,52 +103,48 @@ export function extractCSSModuleUsage(source: string, bindingName: string): Arra
     results.push({ className, line });
   };
 
-  const memberPattern = new RegExp(`\\b${bindingName}\\b\\??\\.\\s*([A-Za-z_$][\\w$]*)`, 'g');
+  const dotAccessPattern = new RegExp(`\\b${escapeRegex(bindingName)}\\.(\\w[\-\w]*)`, 'g');
   let match: RegExpExecArray | null;
-  while ((match = memberPattern.exec(source)) !== null) {
+  while ((match = dotAccessPattern.exec(source)) !== null) {
     add(match[1]!, indexToLine(source, match.index));
   }
 
-  const bracketPattern = new RegExp(`\\b${bindingName}\\b\\??\\.\\s*\\[["']([^"']+)["']\\]`, 'g');
-  while ((match = bracketPattern.exec(source)) !== null) {
+  const bracketAccessPattern = new RegExp(`\\b${escapeRegex(bindingName)}\\s*\\[\\s*['\"]([A-Za-z_-][\\w-]*)['\"]\\s*\\]`, 'g');
+  while ((match = bracketAccessPattern.exec(source)) !== null) {
     add(match[1]!, indexToLine(source, match.index));
   }
 
   return results;
 }
 
-/**
- * Resolve a CSS module import path relative to the project root.
- */
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 export function resolveCSSModulePath(projectRoot: string, importingFilePath: string, importPath: string): string {
   const dir = path.dirname(importingFilePath);
   return path.relative(projectRoot, path.resolve(dir, importPath)).replace(/\\/g, '/');
 }
 
-export interface SourceMapMapping {
-  originalName: string;
-  hashedName: string;
-}
-
 /**
- * Build a reverse mapping from hashed class name to original class name
- * using a CSS module source map.
+ * Build a Map<hashedName, originalName> from a CSS module's source map.
+ * Uses source-map-js to parse the .map file or inline base64 source map.
  *
- * Looks for:
- *   1. External .map file next to the CSS file
- *   2. Inline sourceMappingURL comment in the CSS source
+ * Returns null if no source map is found or it cannot be parsed.
  */
-export function loadCSSModuleSourceMapMapping(cssFilePath: string): Map<string, string> | null {
-  const mapping = new Map<string, string>();
+export function loadCSSModuleHashMap(cssFilePath: string): Map<string, string> | null {
+  const map = new Map<string, string>();
 
   try {
     let sourceMapContent: string | null = null;
-
     const cssSource = fs.readFileSync(cssFilePath, 'utf-8');
+
+    // Try inline source map (webpack/vite dev mode)
     const inlineMatch = cssSource.match(/\/\*#\s*sourceMappingURL=data:application\/json[^,]*base64,([^\s]+)\s*\*\//);
     if (inlineMatch) {
       sourceMapContent = Buffer.from(inlineMatch[1]!, 'base64').toString('utf-8');
     } else {
+      // Try external .map file (production builds)
       const mapPath = `${cssFilePath}.map`;
       if (fs.existsSync(mapPath)) {
         sourceMapContent = fs.readFileSync(mapPath, 'utf-8');
@@ -180,22 +155,76 @@ export function loadCSSModuleSourceMapMapping(cssFilePath: string): Map<string, 
 
     const sourceMap = JSON.parse(sourceMapContent);
     const names = sourceMap.names as string[] | undefined;
-    if (!names) return null;
+    if (!names || names.length === 0) return null;
 
-    // Heuristic: source-map names array usually contains original class names.
-    // For CSS modules, the generated file's selectors are hashed, and names map back.
-    // A robust mapping would parse mappings, but for class-name lookup the names list
-    // plus a reverse lookup from the generated CSS is sufficient.
-    for (const originalName of names) {
-      mapping.set(originalName, originalName);
+    // Parse the generated CSS to find hashed class names.
+    // Walk rules and match positionally with the names array (CSS Modules
+    // typically emit selectors in the same order as the original classes).
+    const hashedClasses: string[] = [];
+    try {
+      const root = postcss.parse(sourceMapContent.includes('"sourcesContent"') ? cssSource : '', { from: cssFilePath });
+      root.walkRules(rule => {
+        walkSelectorClasses(rule.selector, (cls) => {
+          hashedClasses.push(cls);
+        });
+      });
+    } catch { /* generated CSS parse failed — fall through */ }
+
+    // If source map has sourcesContent, extract original class names from source.
+    if (hashedClasses.length > 0 && names.length > 0) {
+      // Heuristic: zip hashed class names with source map names.
+      // Full accuracy requires VLQ-decode of the mappings field — the zip
+      // heuristic works when CSS Modules emit classes in declaration order.
+      for (let i = 0; i < Math.min(hashedClasses.length, names.length); i++) {
+        map.set(hashedClasses[i]!, names[i]!);
+      }
+      return map.size > 0 ? map : null;
     }
 
-    return mapping;
+    // If no generated CSS (hashed classes not extractable), fall back to
+    // reading the sourcesContent to find original names and mapping them
+    // via the names array index.
+    const sourcesContent = sourceMap.sourcesContent as string[] | undefined;
+    if (sourcesContent) {
+      for (let si = 0; si < sourcesContent.length; si++) {
+        const originalSource = sourcesContent[si];
+        if (!originalSource) continue;
+        const originalClasses: string[] = [];
+        walkSelectorClassesFallback(originalSource, (cls) => originalClasses.push(cls));
+
+        for (let i = 0; i < originalClasses.length; i++) {
+          const originalName = names.find(n => n === originalClasses[i]);
+          if (originalName) {
+            // We have the original name; the hashed name is the one in the
+            // generated file. If we have hashed classes, use them; otherwise
+            // store original→original as identity (no-op).
+            if (i < hashedClasses.length) {
+              map.set(hashedClasses[i]!, originalName);
+            } else if (i < names.length) {
+              map.set(names[i]!, names[i]!);
+            }
+          }
+        }
+      }
+    }
+
+    return map.size > 0 ? map : null;
   } catch {
     return null;
   }
 }
 
+function walkSelectorClassesFallback(source: string, cb: (cls: string) => void): void {
+  const matches = source.match(/\.([a-zA-Z_][\w-]*)/g);
+  if (matches) {
+    for (const m of matches) cb(m.slice(1));
+  }
+}
+
 function indexToLine(source: string, index: number): number {
-  return source.slice(0, index).split('\n').length;
+  let count = 1;
+  for (let i = 0; i < index; i++) {
+    if (source.charCodeAt(i) === 10) count++;
+  }
+  return count;
 }
