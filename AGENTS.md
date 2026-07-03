@@ -112,7 +112,7 @@ Plus `.cssgraph.json` project-level `exclude` patterns.
 
 ## Performance
 
-Bobcat (~9,400 files — 1,500 style + 7,900 JS/TS/JSX/es6):
+Production monorepo (~9,400 files — 1,500 style + 7,900 JS/TS/JSX/es6):
 - `cssgraph index` (style only): ~45s
 - `cssgraph index --jsx`: ~2m30s
 - Reference DB: ~2GB, 450K nodes, 5.3M edges

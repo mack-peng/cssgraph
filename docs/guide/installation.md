@@ -117,7 +117,7 @@ This enables the `cssgraph_rule` / `cssgraph_callers` tools to report which comp
 | Project | Style files | --jsx files | First index | Repeat index |
 |---------|-----------|-------------|-------------|-------------|
 | ~50 style files | 50 | — | ~15s | <1s |
-| Bobcat (Strikingly monorepo) | 1,500 | +7,900 | ~2m30s | <4m |
+| Production monorepo | 1,500 | +7,900 | ~2m30s | <4m |
 
 ## 5. Auto-sync
 

@@ -131,7 +131,7 @@ Opt-in scanning of `.jsx`/`.tsx`/`.js`/`.ts`/`.es6` files for:
 - **CSS-in-JS** — `styled.div\`...\`` and `css\`...\`` templates
 - **CSS Modules** — `import styles from './X.module.css'` and dynamic `import()` / `require()`
 
-Without `--jsx`, cssgraph indexes style files only (CSS, SCSS, Less, Sass). This is the fast path — 500 style files in ~45s on bobcat. With `--jsx`, 9,400 files total in ~2m30s.
+Without `--jsx`, cssgraph indexes style files only (CSS, SCSS, Less, Sass). This is the fast path — 500 style files in ~45s on a production monorepo. With `--jsx`, 9,400 files total in ~2m30s.
 
 ---
 
@@ -175,7 +175,7 @@ Without `--jsx`, cssgraph indexes style files only (CSS, SCSS, Less, Sass). This
 | Project | Style files | --jsx total | First index | Nodes | Edges |
 |---------|-----------|-------------|-------------|-------|-------|
 | Small | ~50 | — | ~15s | ~16K | ~50K |
-| Bobcat (Strikingly) | 1,500 | 9,400 | ~2m30s | 450K | 5.3M |
+| Production monorepo | 1,500 | 9,400 | ~2m30s | 450K | 5.3M |
 
 ---
 

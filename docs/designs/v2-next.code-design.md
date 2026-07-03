@@ -208,8 +208,8 @@ Same pool, same workers, just dispatched in two sequential groups.
 
 | Scenario | Serial | 4 workers | 8 workers |
 |----------|--------|-----------|-----------|
-| bobcat --jsx (9,400 files) | ~2m30s | ~1m15s | ~50s |
-| bobcat style-only (1,500) | ~45s | ~25s | ~18s |
+| production monorepo --jsx (9,400 files) | ~2m30s | ~1m15s | ~50s |
+| production monorepo style-only (1,500) | ~45s | ~25s | ~18s |
 
 Diminishing returns beyond 4 workers due to SQLite write serialization
 (still single-threaded) and file I/O bandwidth.

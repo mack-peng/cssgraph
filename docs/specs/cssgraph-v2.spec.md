@@ -331,7 +331,7 @@ cssgraph (src/index.ts)
 
 ## Release Checklist
 
-- [ ] 所有新 parser（stylus, sass, pcss）在 bobcat 1,486 文件项目上验证无回归
+- [ ] 所有新 parser（stylus, sass, pcss）在 production monorepo 1,486 文件项目上验证无回归
 - [ ] Tailwind v4 解析在含 `@theme` 的 CSS 文件上验证
 - [ ] `cssgraph diff` 输出格式与 `git diff` 类似，可读
 - [ ] `cssgraph unused` 输出含文件路径 + 行号

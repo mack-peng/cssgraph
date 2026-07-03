@@ -2,7 +2,7 @@
 
 ## Problem
 
-`cssgraph index --jsx` on bobcat (9,400+ files) initially took **9 minutes**.
+`cssgraph index --jsx` on a production monorepo (9,400+ files) initially took **9 minutes**.
 Every re-index was a **full rebuild** — all files re-parsed and re-inserted,
 even when nothing changed. The bottleneck chain was:
 
@@ -43,7 +43,7 @@ Three optimisation tiers (P0 → P1 → P2), each building on the last.
 
 | # | Requirement | Acceptance criteria |
 |---|-------------|---------------------|
-| R1 | Git-first file discovery | bobcat scan < 5s; fallback to walk on non-git |
+| R1 | Git-first file discovery | scan < 5s; fallback to walk on non-git |
 | R2 | Unchanged files skip parse | Second `index --jsx` processes only changed files |
 | R3 | mtime-cached config | Repeated `loadProjectConfig` hits cache |
 | R4 | Batch I/O reads | Parallel `readFile` batches of 10 |
@@ -55,8 +55,8 @@ Three optimisation tiers (P0 → P1 → P2), each building on the last.
 
 ## Sign-off
 
-- [x] bobcat `index --jsx` initial: **3m 36s** (P0 applied, was 5m08s before any perf work, 9m04s at baseline)
-- [x] bobcat `index --jsx` repeat (no changes): 3m 05s parsing phase
+- [x] production monorepo `index --jsx` initial: **3m 36s** (P0 applied, was 5m08s before any perf work, 9m04s at baseline)
+- [x] production monorepo `index --jsx` repeat (no changes): 3m 05s parsing phase
 - [x] `cssgraph details ".container .sixteen.columns"` — correct
 - [x] `cssgraph rule ".s-dash-content .s-dash-content-header" --strict` — correct
 - [x] Non-git fallback: filesystem walk untouched
