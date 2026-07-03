@@ -3,6 +3,7 @@
 ## Requirements
 
 - **Node.js >= 22.5.0** — cssgraph uses Node's built-in `node:sqlite` module. Check your version with `node --version`.
+- **git** (recommended) — cssgraph uses `git ls-files` for fast file discovery. Falls back to filesystem walk for non-git projects.
 
 ## 1. Install the CLI
 
@@ -20,7 +21,15 @@ cssgraph version
 
 cssgraph exposes itself as an MCP server. Add it to your agent's MCP config so the agent can query the style graph directly.
 
-### opencode
+### Auto-install
+
+```bash
+cssgraph install
+```
+
+Auto-detects and configures opencode, Claude Code, Cursor, Codex CLI, Gemini CLI, and Kiro.
+
+### Manual: opencode
 
 Add to `opencode.jsonc` (or `opencode.json`):
 
@@ -28,15 +37,15 @@ Add to `opencode.jsonc` (or `opencode.json`):
 {
   "mcpServers": {
     "cssgraph": {
-      "type": "stdio",
-      "command": "cssgraph",
-      "args": ["serve", "--mcp"]
+      "type": "local",
+      "command": ["cssgraph", "serve", "--mcp"],
+      "enabled": true
     }
   }
 }
 ```
 
-### Claude Code
+### Manual: Claude Code
 
 Add to `~/.claude.json`:
 
@@ -52,21 +61,9 @@ Add to `~/.claude.json`:
 }
 ```
 
-Optionally add auto-allow permissions in `~/.claude/settings.json`:
+### Manual: Cursor / other MCP agents
 
-```json
-{
-  "permissions": {
-    "allow": [
-      "mcp__cssgraph__*"
-    ]
-  }
-}
-```
-
-### Cursor
-
-Add to Cursor's MCP config (`.cursor/mcp.json` or Cursor Settings > MCP):
+Add to your MCP config file:
 
 ```json
 {
@@ -80,21 +77,9 @@ Add to Cursor's MCP config (`.cursor/mcp.json` or Cursor Settings > MCP):
 }
 ```
 
-### Other MCP-compatible agents
-
-Any agent that supports the MCP protocol can connect to cssgraph. Use the same server config block above, adjusting the config path for your agent.
-
-### Auto-install (coming soon)
-
-```bash
-cssgraph install
-```
-
-Will auto-detect and configure supported agents. Currently in development.
-
 ## 3. Restart your agent
 
-Restart your agent for the MCP server to load. Once restarted, the agent will see `cssgraph_explore`, `cssgraph_search`, `cssgraph_callers`, `cssgraph_impact`, `cssgraph_files`, and `cssgraph_status` as available tools.
+Restart your agent for the MCP server to load. Once restarted, the agent will see 11 MCP tools: `cssgraph_explore`, `cssgraph_search`, `cssgraph_callers`, `cssgraph_impact`, `cssgraph_rule`, `cssgraph_details`, `cssgraph_unused`, `cssgraph_cascade`, `cssgraph_property`, `cssgraph_files`, and `cssgraph_status`.
 
 ## 4. Initialize each project
 
@@ -103,9 +88,7 @@ cd your-project
 cssgraph init
 ```
 
-`cssgraph init` creates the local `.cssgraph/` directory and builds the full style graph in one step. It scans all `.css`, `.scss`, and `.less` files (excluding `node_modules`, `dist`, `build`, `.git`, and `.gitignore`d paths), parses them with PostCSS, and stores the result in a SQLite + FTS5 database.
-
-A single global install covers every project; you run `cssgraph init` once per project.
+`cssgraph init` creates the local `.cssgraph/` directory and builds the full style graph in one step.
 
 ### What gets indexed
 
@@ -117,9 +100,24 @@ A single global install covers every project; you run `cssgraph init` once per p
 | At-rule | `at_rule` | `@media (max-width: 768px)`, `@keyframes fadeIn` |
 | Style file | `file` | `styles/main.scss` |
 
-### Indexing a large project
+By default, `cssgraph` indexes CSS, SCSS, Less, and Sass files. Excluded by default: `node_modules`, `dist`, `build`, `.git`, `.next`, test files (`*.test.*`, `*.stories.*`, `*.spec.*`), `__tests__/`, and `generated/`.
 
-On a project with ~50 style files, `cssgraph init` completes in under 15 seconds and produces ~16,000 nodes. The `.cssgraph/cssgraph.db` is typically a few MB.
+### Indexing with JSX/TSX support
+
+To also scan `.jsx`, `.tsx`, `.js`, `.ts`, and `.es6` files for className references and CSS modules:
+
+```bash
+cssgraph index --jsx
+```
+
+This enables the `cssgraph_rule` / `cssgraph_callers` tools to report which component files reference each className. Style files are always indexed first so references can be matched.
+
+### Indexing scale
+
+| Project | Style files | --jsx files | First index | Repeat index |
+|---------|-----------|-------------|-------------|-------------|
+| ~50 style files | 50 | — | ~15s | <1s |
+| Bobcat (Strikingly monorepo) | 1,500 | +7,900 | ~2m30s | <4m |
 
 ## 5. Auto-sync
 
@@ -127,44 +125,63 @@ After initialization, the MCP server watches your project using native OS file e
 
 Tune the debounce window with the `CSSGRAPH_WATCH_DEBOUNCE_MS` environment variable (in milliseconds, clamped to `[100, 60000]`).
 
+## Project Configuration (`.cssgraph.json`)
+
+Optional file at your project root:
+
+```json
+{
+  "exclude": ["static/vendor/", "**/legacy/**", "**/*.generated.*"],
+  "extensions": {
+    ".pcss": "css"
+  }
+}
+```
+
+- **`exclude`** — gitignore-style patterns for paths to keep out of the index, even when git-tracked.
+- **`extensions`** — map custom file extensions to supported languages.
+
+Built-in default excludes (always applied, even without `.cssgraph.json`):
+```
+**/*.test.*  **/*.stories.*  **/*.spec.*  **/__tests__/**  **/generated/**
+```
+
 ## Upgrading
 
 ```bash
 npm i -g cssgraph@latest
 ```
 
-After upgrading, re-index each project to pick up any new extraction capabilities:
+After upgrading, re-index each project:
 
 ```bash
 cd your-project
-cssgraph index
+cssgraph index       # style only (fast)
+cssgraph index --jsx # include JSX references (if needed)
 ```
 
 ## Uninstall
-
-Remove the CLI:
 
 ```bash
 npm uninstall -g cssgraph
 ```
 
-Remove per-project data:
+Remove per-project data and MCP config:
 
 ```bash
-cd your-project
-rm -rf .cssgraph
+cd your-project && rm -rf .cssgraph
 ```
-
-Remove MCP config from your agent's config file (the `cssgraph` server entry).
 
 ## Troubleshooting
 
 **"cssgraph not initialized"** — Run `cssgraph init` in your project directory first.
 
-**SCSS parsing fails** — Ensure `postcss-scss` is installed. It ships as a dependency of cssgraph; reinstall if needed: `npm i -g cssgraph@latest`.
+**SCSS/Less parsing fails** — Ensure `postcss-scss` and `postcss-less` are installed. They ship as dependencies of cssgraph; reinstall if needed: `npm i -g cssgraph@latest`.
 
-**MCP server not connecting** — Your agent starts the server itself. Make sure the project is initialized (`cssgraph status`) and the path in your MCP config is correct.
+**MCP server not connecting** — Make sure the project is initialized (`cssgraph status`) and the path in your MCP config is correct. Try restarting your agent.
 
-**Indexing is slow** — Check that `node_modules` and other large directories are excluded. Add custom excludes to `.cssgraph.json` if needed.
+**Indexing is slow on a large project** — The initial index scans all files. For JSX scanning (`--jsx`), the first run parses every file; subsequent runs use content-hash skipping for unchanged files. Add custom excludes to `.cssgraph.json` for vendor/theme directories you don't need indexed.
 
-**Less files not being parsed** — V1 has experimental Less support. Report issues on GitHub.
+**Index stalls at "Cleaning existing data"** — This happens on sparse filesystems (e.g. Docker for Mac). The re-init phase deletes the old DB file and creates a fresh one; give it ~5s.
+
+**Sass (indented syntax) support** — `.sass` files require the `sass` package (`npm i -g sass`). Without it, `.sass` files are skipped.

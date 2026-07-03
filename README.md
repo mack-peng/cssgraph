@@ -19,9 +19,9 @@
 
 ## Why cssgraph?
 
-When an AI agent needs to understand CSS — where is `.btn-primary` defined, what properties does it have, which other selectors override it — it discovers style the slow way: grep, glob, and Read, one file at a time, reconstructing the cascade by hand.
+When an AI agent needs to understand CSS — where is `.btn-primary` defined, what properties does it have, which selectors cascade over it, which JSX components reference it — it discovers style the slow way: grep, glob, and Read, one file at a time, reconstructing the cascade by hand.
 
-**cssgraph hands the agent the exact style context it needs in one call.** It's a pre-built knowledge graph of every className, CSS property, variable, and at-rule in your stylesheets — so instead of crawling files, the agent asks one question and gets back the properties, overrides, specificity, and callers in full.
+**cssgraph hands the agent the exact style context it needs in one call.** It's a pre-built knowledge graph of every className, CSS property, variable, and at-rule in your stylesheets — so instead of crawling files, the agent asks one question and gets back the properties, overrides, specificity, callers, and file-level impact in full.
 
 ## Get Started
 
@@ -40,11 +40,17 @@ cd your-project
 cssgraph init
 ```
 
-`cssgraph init` creates the local `.cssgraph/` directory and builds the full style graph in one step.
+`cssgraph init` creates the local `.cssgraph/` directory and builds the full style graph in one step. Supports CSS, SCSS, Less, Sass (indented), and PostCSS custom syntaxes.
 
 ### 3. Add to your agent (MCP)
 
-Add to your agent's MCP server config:
+```bash
+cssgraph install
+```
+
+Auto-detects and configures opencode, Claude Code, Cursor, Codex CLI, Gemini CLI, and Kiro.
+
+Or add manually:
 
 ```json
 {
@@ -58,8 +64,6 @@ Add to your agent's MCP server config:
 }
 ```
 
-Or run `cssgraph install` to auto-detect and configure supported agents.
-
 ### 4. No more syncing
 
 Auto-sync is enabled by default. cssgraph watches the project and updates the graph on every file change — while your agent edits code, or you add/modify/delete CSS files. **The index is never stale.**
@@ -69,48 +73,64 @@ Auto-sync is enabled by default. cssgraph watches the project and updates the gr
 ## How It Works
 
 ```
-┌──────────────────────────────────────────────────────┐
-│                     AI Agent                          │
-│                                                      │
-│  "What styles affect .btn-primary?"                  │
-│      calls cssgraph_explore — one tool call          │
-│                            │                         │
-└────────────────────────────┬────────────────────────┘
-                             │
-                             ▼
-┌──────────────────────────────────────────────────────┐
-│                 cssgraph MCP Server                   │
-│                                                      │
-│ explore · one call → properties + overrides +        │
-│ specificity + callers grouped by file                │
-│                            │                         │
-│                            ▼                         │
-│              SQLite knowledge graph                  │
-│    classNames · properties · variables · at-rules    │
-│           edges · FTS5 full-text search              │
-└──────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────┐
+│                      AI Agent                              │
+│                                                           │
+│  "What code files use .btn-primary?"                      │
+│      calls cssgraph_rule — one tool call                  │
+│                             │                             │
+└─────────────────────────────┬─────────────────────────────┘
+                              │
+                              ▼
+┌───────────────────────────────────────────────────────────┐
+│                  cssgraph MCP Server                       │
+│                                                           │
+│ rule · O(1) exact selector lookup · loose/strict impact   │
+│ explore · properties + overrides + specificity + callers  │
+│                             │                             │
+│                             ▼                             │
+│               SQLite knowledge graph                      │
+│     classNames · properties · variables · at-rules        │
+│            edges · FTS5 full-text search                  │
+└───────────────────────────────────────────────────────────┘
 ```
 
-1. **Extraction** — PostCSS parses CSS/SCSS/Less into ASTs. Walk rules to extract class selectors, properties, CSS variables, and at-rules.
-2. **Storage** — Everything goes into a local SQLite database (`.cssgraph/cssgraph.db`) with FTS5 full-text search.
-3. **Graph** — Edges connect related nodes: `contains` (selector→property), `nests` (parent→child selector), `overrides` (higher specificity selector overrides lower), `imports` (file→imported file), `references` (property→CSS variable).
-4. **Auto-Sync** — The MCP server watches your project using native OS file events. Changes are debounced and incrementally synced.
+1. **Extraction** — PostCSS parses CSS/SCSS/Less/Sass into ASTs. CSS-in-JS (`styled.div`) and JSX className references extracted from `.jsx`/`.tsx` files with `--jsx`.
+2. **Storage** — Everything goes into a local SQLite database (`.cssgraph/cssgraph.db`) with FTS5 full-text search. WAL-mode + batch commits for write performance.
+3. **Graph** — Edges connect related nodes: `contains` (selector→property), `nests` (parent→child selector), `overrides` (higher specificity selector overrides lower), `imports` (file→imported file), `references` (JSX file→className, property→CSS variable).
+4. **Git-first scanning** — `git ls-files` for instant file discovery. Falls back to filesystem walk on non-git projects.
+5. **Auto-Sync** — Native OS file events, debounced, incrementally synced.
 
 ---
 
 ## CLI Reference
 
 ```bash
-cssgraph init [path]              # Initialize a project + build its graph
-cssgraph index [path]             # Rebuild the full index from scratch
-cssgraph query <className>        # Search for className selectors and properties
-cssgraph explore <query...>       # One-shot: full style context for a className
-cssgraph impact <className>       # Analyze what is affected by changing a className
-cssgraph files [path]             # Show project style file structure
-cssgraph status [path]            # Show index statistics
-cssgraph sync [path]              # Incremental update
-cssgraph serve --mcp              # Start the MCP server
+cssgraph init [path]                 # Initialize + build graph
+cssgraph index [path] [--jsx]        # Rebuild from scratch
+cssgraph query <className>           # Search for className selectors
+cssgraph explore <query...>          # Full style context for a className
+cssgraph details <selector>          # O(1) exact selector → file:line lookup
+cssgraph rule <selector> [--strict]  # Selector impact: exact + loose/strict files
+cssgraph impact <className>          # Blast radius of changing a className
+cssgraph unused                      # Find unreferenced class selectors
+cssgraph cascade <className>         # Visualize cascade path
+cssgraph property <query...>         # Search by CSS property value
+cssgraph files [path]                # Project style file tree
+cssgraph status [path]               # Index statistics
+cssgraph sync [path]                 # Incremental update
+cssgraph serve --mcp                 # Start MCP server
+cssgraph install                     # Auto-wire to your AI agent
 ```
+
+### `--jsx` flag
+
+Opt-in scanning of `.jsx`/`.tsx`/`.js`/`.ts`/`.es6` files for:
+- **className references** — `className="btn primary"` → builds `references` edges from component files to className nodes
+- **CSS-in-JS** — `styled.div\`...\`` and `css\`...\`` templates
+- **CSS Modules** — `import styles from './X.module.css'` and dynamic `import()` / `require()`
+
+Without `--jsx`, cssgraph indexes style files only (CSS, SCSS, Less, Sass). This is the fast path — 500 style files in ~45s on bobcat. With `--jsx`, 9,400 files total in ~2m30s.
 
 ---
 
@@ -118,51 +138,48 @@ cssgraph serve --mcp              # Start the MCP server
 
 | Tool | Purpose |
 |------|---------|
-| `cssgraph_explore` | **PRIMARY**: Get full style context for a className — properties, overrides, specificity, and callers in one call |
+| `cssgraph_explore` | **PRIMARY**: Full style context for a className — properties, overrides, specificity, callers |
 | `cssgraph_search` | Search for className selectors by name |
-| `cssgraph_callers` | Find JSX components that reference a className |
-| `cssgraph_impact` | Analyze the impact radius of changing a className |
-| `cssgraph_files` | List project style files from the index |
-| `cssgraph_status` | Show index statistics |
+| `cssgraph_callers` | Find JSX components referencing a className |
+| `cssgraph_impact` | Blast radius of changing a className |
+| `cssgraph_rule` | Blast radius of a full CSS selector (exact match + loose/strict file impact) |
+| `cssgraph_details` | O(1) exact selector lookup (no edges, lightweight) |
+| `cssgraph_unused` | Find class selectors with no incoming references |
+| `cssgraph_cascade` | Visualize the cascade path for a className |
+| `cssgraph_property` | Search selectors by CSS property value |
+| `cssgraph_files` | Indexed style file tree |
+| `cssgraph_status` | Index health check |
 
 ---
 
 ## Supported Languages
 
-| Language | Extension | Status |
-|----------|-----------|--------|
-| CSS | `.css` | Full support |
-| SCSS / Sass | `.scss` | Full support (nesting, `&` parent, variables, `@use`/`@forward`/`@import`) |
-| Less | `.less` | Parse support (nesting, variables) |
-| CSS Modules | `.module.css`, `.module.scss` | Source className extraction (hash reverse mapping in V2) |
-| Tailwind | `tailwind.config.js` | Utility class → CSS property mapping table |
+| Language | Extension | Extraction |
+|----------|-----------|------------|
+| CSS | `.css` | PostCSS standard |
+| SCSS | `.scss` | postcss-scss plugin |
+| Less | `.less` | postcss-less plugin |
+| Sass (indented) | `.sass` | Compile → PostCSS |
+| PostCSS custom | `.pcss` | PostCSS standard |
+| JSX / TSX | `.jsx` `.tsx` | className + CSS-in-JS (`--jsx`) |
+| JavaScript / TypeScript | `.js` `.ts` `.es6` | className + CSS Modules (`--jsx`) |
+| CSS Modules | `.module.css` `.module.scss` `.module.less` | Dynamic import resolution |
+| Tailwind | `tailwind.config.js` + CSS `@theme` | v3 JS config + v4 CSS config |
 
 ---
 
-## Supported Agents
+## Production Scale
 
-cssgraph works as an MCP server with any MCP-compatible agent:
-
-- **opencode**
-- **Claude Code**
-- **Cursor**
-- **Codex CLI**
-- **Gemini CLI**
-- **Kiro**
-
-Run `cssgraph install` to auto-detect and configure supported agents.
+| Project | Style files | --jsx total | First index | Nodes | Edges |
+|---------|-----------|-------------|-------------|-------|-------|
+| Small | ~50 | — | ~15s | ~16K | ~50K |
+| Bobcat (Strikingly) | 1,500 | 9,400 | ~2m30s | 450K | 5.3M |
 
 ---
 
-## Configuration
+## Project Configuration
 
-Zero-config by default. cssgraph auto-detects style files and excludes `node_modules`, `dist`, `build`, `.git`, `.next`, `.cssgraph` and `.gitignore`d paths automatically.
-
-To keep something else out, add it to `.gitignore`. To pull a default-excluded directory back in, add a negation — `!vendor/`.
-
-### `.cssgraph.json`
-
-Optional project-level config at your project root:
+Zero-config by default. Optional `.cssgraph.json` at your project root:
 
 ```json
 {
@@ -172,6 +189,8 @@ Optional project-level config at your project root:
   }
 }
 ```
+
+Built-in default excludes (always applied): `*.test.*`, `*.stories.*`, `*.spec.*`, `__tests__/`, `generated/`.
 
 ---
 
