@@ -200,19 +200,23 @@ export class CodeGraph {
     }
     ig.add(['node_modules', 'dist', 'build', '.git', '.next', '.cssgraph', '.codegraph']);
 
-    const scanFiles = (dir: string): string[] => {
-      const entries = require('fs').readdirSync(dir, { withFileTypes: true });
+    const scanFiles = (rootDir: string): string[] => {
       const results: string[] = [];
-      for (const entry of entries) {
-        const fullPath = path.join(dir, entry.name);
-        const relativePath = path.relative(this.projectRoot, fullPath).replace(/\\/g, '/');
-        if (ig.ignores(relativePath)) continue;
-        if (entry.isDirectory()) {
-          results.push(...scanFiles(fullPath));
-        } else if (entry.isFile()) {
-          const lang = detectLanguage(relativePath);
-          if (isLanguageSupported(lang)) {
-            results.push(relativePath);
+      const stack: string[] = [rootDir];
+      while (stack.length > 0) {
+        const dir = stack.pop()!;
+        const entries = require('fs').readdirSync(dir, { withFileTypes: true });
+        for (const entry of entries) {
+          const fullPath = path.join(dir, entry.name);
+          const relativePath = path.relative(this.projectRoot, fullPath).replace(/\\/g, '/');
+          if (ig.ignores(relativePath)) continue;
+          if (entry.isDirectory()) {
+            stack.push(fullPath);
+          } else if (entry.isFile()) {
+            const lang = detectLanguage(relativePath);
+            if (isLanguageSupported(lang)) {
+              results.push(relativePath);
+            }
           }
         }
       }
@@ -237,17 +241,19 @@ export class CodeGraph {
     let totalEdges = 0;
     const allErrors: import('./types').ExtractionError[] = [];
 
-    // Build a name -> class selector node ids map once we reach JSX files.
-    let classSelectorMap: Map<string, string[]> | null = null;
-    const ensureClassSelectorMap = (): Map<string, string[]> => {
-      if (classSelectorMap) return classSelectorMap;
-      classSelectorMap = new Map<string, string[]>();
-      for (const node of this.queries.getNodesByKind('class_selector')) {
-        const list = classSelectorMap.get(node.name) || [];
-        list.push(node.id);
-        classSelectorMap.set(node.name, list);
-      }
-      return classSelectorMap;
+    // Incrementally built as style files are processed; no full-DB query needed.
+    const classSelectorMap: Map<string, string[]> = new Map();
+    // Cache CSS module class maps to avoid repeated DB queries.
+    const moduleClassMapCache = new Map<string, Map<string, string[]>>();
+
+    // Fast-skip heuristic: skip JSX extraction for files with no CSS-related markers.
+    const hasJSXMarkers = (source: string): boolean => {
+      return source.indexOf('className') !== -1 ||
+        source.indexOf('classNames(') !== -1 ||
+        source.indexOf('cx(') !== -1 ||
+        source.indexOf('clsx(') !== -1 ||
+        source.indexOf('.module.') !== -1 ||
+        source.indexOf('styled') !== -1;
     };
 
     for (let i = 0; i < orderedFiles.length; i++) {
@@ -270,26 +276,25 @@ export class CodeGraph {
           result = extractCSSInJS(filePath, source);
           fileNodeId = result.nodes.find(n => n.kind === 'file')?.id;
 
-          const refs = extractClassNameUsage(source, filePath);
-          if (refs.length > 0 && fileNodeId) {
-            const map = ensureClassSelectorMap();
-            for (const ref of refs) {
-              const targetIds = map.get(ref.className);
-              if (!targetIds || targetIds.length === 0) continue;
-              for (const targetId of targetIds) {
-                result.edges.push({
-                  source: fileNodeId,
-                  target: targetId,
-                  kind: 'references',
-                  provenance: 'heuristic',
-                  line: ref.line,
-                });
+          // Fast-skip: only scan className references and CSS modules if file has JSX markers.
+          if (hasJSXMarkers(source) && fileNodeId) {
+            const refs = extractClassNameUsage(source, filePath);
+            if (refs.length > 0) {
+              for (const ref of refs) {
+                const targetIds = classSelectorMap.get(ref.className);
+                if (!targetIds || targetIds.length === 0) continue;
+                for (const targetId of targetIds) {
+                  result.edges.push({
+                    source: fileNodeId,
+                    target: targetId,
+                    kind: 'references',
+                    provenance: 'heuristic',
+                    line: ref.line,
+                  });
+                }
               }
             }
-          }
 
-          // CSS Modules dynamic import / require
-          if (fileNodeId) {
             const cssModuleImports = findCSSModuleImports(source);
             for (const imp of cssModuleImports) {
               const cssModulePath = resolveCSSModulePath(this.projectRoot, path.join(this.projectRoot, filePath), imp.importPath);
@@ -304,29 +309,31 @@ export class CodeGraph {
               });
 
               if (imp.bindingName) {
-                const moduleSelectors = this.queries.getNodesByFile(cssModulePath)
-                  .filter(n => n.kind === 'class_selector');
-                if (moduleSelectors.length > 0) {
-                  const moduleClassMap = new Map<string, string[]>();
+                let moduleClassMap = moduleClassMapCache.get(cssModulePath);
+                if (!moduleClassMap) {
+                  moduleClassMap = new Map<string, string[]>();
+                  const moduleSelectors = this.queries.getNodesByFile(cssModulePath)
+                    .filter(n => n.kind === 'class_selector');
                   for (const node of moduleSelectors) {
                     const list = moduleClassMap.get(node.name) || [];
                     list.push(node.id);
                     moduleClassMap.set(node.name, list);
                   }
+                  moduleClassMapCache.set(cssModulePath, moduleClassMap);
+                }
 
-                  const usages = extractCSSModuleUsage(source, imp.bindingName);
-                  for (const usage of usages) {
-                    const targetIds = moduleClassMap.get(usage.className);
-                    if (!targetIds || targetIds.length === 0) continue;
-                    for (const targetId of targetIds) {
-                      result.edges.push({
-                        source: fileNodeId,
-                        target: targetId,
-                        kind: 'references',
-                        provenance: 'heuristic',
-                        line: usage.line,
-                      });
-                    }
+                const usages = extractCSSModuleUsage(source, imp.bindingName);
+                for (const usage of usages) {
+                  const targetIds = moduleClassMap.get(usage.className);
+                  if (!targetIds || targetIds.length === 0) continue;
+                  for (const targetId of targetIds) {
+                    result.edges.push({
+                      source: fileNodeId,
+                      target: targetId,
+                      kind: 'references',
+                      provenance: 'heuristic',
+                      line: usage.line,
+                    });
                   }
                 }
               }
@@ -348,6 +355,11 @@ export class CodeGraph {
         for (const node of result.nodes) {
           this.queries.insertNode(node);
           totalNodes++;
+          if (node.kind === 'class_selector' && !node.name.startsWith('#')) {
+            const list = classSelectorMap.get(node.name) || [];
+            list.push(node.id);
+            classSelectorMap.set(node.name, list);
+          }
         }
         for (const edge of result.edges) {
           this.queries.insertEdge(edge);
