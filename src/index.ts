@@ -1,4 +1,5 @@
 import * as path from 'path';
+import * as fsp from 'fs/promises';
 import {
   Node, Edge, FileRecord, Subgraph, TraversalOptions,
   SearchOptions, SearchResult, GraphStats, IndexProgress, IndexResult, SyncResult,
@@ -213,7 +214,10 @@ export class CodeGraph {
         } else {
           styleFiles.push(relativePath);
         }
-        fileCount++;
+        // Yield every 200 files so the event loop stays responsive.
+        if (++fileCount % 200 === 0) {
+          await new Promise<void>(r => setImmediate(r));
+        }
       }
     } else {
       // Filesystem walk fallback (non-git project).
@@ -229,7 +233,7 @@ export class CodeGraph {
         ig.add(projectConfig.exclude);
       }
 
-      const scanFiles = (rootDir: string): void => {
+      const scanFiles = async (rootDir: string): Promise<void> => {
         const stack: string[] = [rootDir];
         while (stack.length > 0) {
           const dir = stack.pop()!;
@@ -248,6 +252,10 @@ export class CodeGraph {
                 jsxFiles.push(relativePath);
               } else {
                 styleFiles.push(relativePath);
+              }
+              // Yield every 200 files so the event loop stays responsive.
+              if (++fileCount % 200 === 0) {
+                await new Promise<void>(r => setImmediate(r));
               }
             }
           }
@@ -292,23 +300,51 @@ export class CodeGraph {
         source.indexOf('styled') !== -1;
     };
 
-    const BATCH_SIZE = 100;
+    const SAVEPOINT_BATCH_SIZE = 100;
+    const FILE_IO_BATCH_SIZE = 10;
+    const MAX_FILE_SIZE = 1_000_000; // 1 MB — skip minified / generated files
 
     this.db.getDb().exec('BEGIN');
     let fileCountInBatch = 0;
+    let globalIdx = 0;
 
-    for (let i = 0; i < orderedFiles.length; i++) {
-      const filePath = orderedFiles[i]!;
+    for (let bi = 0; bi < orderedFiles.length; bi += FILE_IO_BATCH_SIZE) {
       if (options.signal?.aborted) break;
 
-      if (options.onProgress) {
-        options.onProgress({ phase: 'parsing', current: i, total: orderedFiles.length, currentFile: filePath });
-      }
+      const batch = orderedFiles.slice(bi, bi + FILE_IO_BATCH_SIZE);
+      const fileContents = await Promise.all(batch.map(async (fp) => {
+        const fullPath = path.join(this.projectRoot, fp);
+        try {
+          const content = await fsp.readFile(fullPath, 'utf-8');
+          const s = await fsp.stat(fullPath);
+          return { filePath: fp, source: content, stat: s, error: null as Error | null };
+        } catch (err) {
+          return { filePath: fp, source: null as string | null, stat: null as import('fs').Stats | null, error: err as Error };
+        }
+      }));
 
-      try {
-        const fullPath = path.join(this.projectRoot, filePath);
-        const source = require('fs').readFileSync(fullPath, 'utf-8');
-        const contentHash = require('crypto').createHash('sha256').update(source).digest('hex');
+      for (const { filePath, source, stat, error } of fileContents) {
+        if (options.signal?.aborted) break;
+
+        if (options.onProgress) {
+          options.onProgress({ phase: 'parsing', current: globalIdx, total: orderedFiles.length, currentFile: filePath });
+        }
+
+        if (error || source === null) {
+          filesErrored++;
+          allErrors.push({ message: `Failed to read file: ${error instanceof Error ? error.message : String(error)}`, filePath, severity: 'error', code: 'read_error' });
+          globalIdx++;
+          continue;
+        }
+
+        if (stat && stat.size > MAX_FILE_SIZE) {
+          filesSkipped++;
+          globalIdx++;
+          continue;
+        }
+
+        try {
+          const contentHash = require('crypto').createHash('sha256').update(source).digest('hex');
 
         // Content-hash skip: unchanged files skip parse + DB write.
         // Style files still need their class_selector nodes restored to the in-memory
@@ -326,12 +362,13 @@ export class CodeGraph {
             }
           }
           fileCountInBatch++; // count toward batch so we commit periodically even with skips
-          if (fileCountInBatch >= BATCH_SIZE) {
+          if (fileCountInBatch >= SAVEPOINT_BATCH_SIZE) {
             this.db.getDb().exec('COMMIT');
             this.db.getDb().exec('BEGIN');
             fileCountInBatch = 0;
           }
           filesSkipped++;
+          globalIdx++;
           continue;
         }
 
@@ -413,6 +450,7 @@ export class CodeGraph {
         if (result.errors.length > 0 && result.nodes.length === 0) {
           filesErrored++;
           allErrors.push(...result.errors);
+          globalIdx++;
           continue;
         }
 
@@ -448,22 +486,25 @@ export class CodeGraph {
 
         filesIndexed++;
         if (result.errors.length > 0) allErrors.push(...result.errors);
+        globalIdx++;
 
         fileCountInBatch++;
-        if (fileCountInBatch >= BATCH_SIZE) {
+        if (fileCountInBatch >= SAVEPOINT_BATCH_SIZE) {
           this.db.getDb().exec('COMMIT');
           this.db.getDb().exec('BEGIN');
           fileCountInBatch = 0;
+          }
+        } catch (err) {
+          try { this.db.getDb().exec('ROLLBACK TO sp'); } catch { /* not in SAVEPOINT */ }
+          filesErrored++;
+          globalIdx++;
+          allErrors.push({
+            message: err instanceof Error ? err.message : String(err),
+            filePath,
+            severity: 'error',
+            code: 'parse_error',
+          });
         }
-      } catch (err) {
-        try { this.db.getDb().exec('ROLLBACK TO sp'); } catch { /* not in SAVEPOINT */ }
-        filesErrored++;
-        allErrors.push({
-          message: err instanceof Error ? err.message : String(err),
-          filePath,
-          severity: 'error',
-          code: 'parse_error',
-        });
       }
     }
 
