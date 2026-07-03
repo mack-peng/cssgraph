@@ -128,6 +128,38 @@ This enables the `cssgraph_rule` / `cssgraph_callers` tools to report which comp
 | ~50 style files | 50 | — | ~15s | <1s |
 | Production monorepo | 1,500 | +7,900 | ~2m30s | <4m |
 
+## Commands & Tools
+
+All cssgraph operations are available as both CLI commands and MCP tools.
+The MCP server (`cssgraph serve --mcp`) exposes these to your AI agent.
+
+### Style queries
+
+| CLI | MCP tool | What it does |
+|-----|----------|-------------|
+| `cssgraph explore <query>` | `cssgraph_explore` | Full context for a className — properties, overrides, specificity, callers |
+| `cssgraph details <selector>` | `cssgraph_details` | O(1) exact selector → file:line lookup |
+| `cssgraph rule <selector>` | `cssgraph_rule` | Selector impact: exact match + related selectors + file impact |
+| `cssgraph query <name>` | `cssgraph_search` | Search for className selectors by name |
+
+### Impact analysis
+
+| CLI | MCP tool | What it does |
+|-----|----------|-------------|
+| `cssgraph impact-selector <selector>` | `cssgraph_impact_selector` | Find code files (JS/TS/JSX/TSX) affected by a CSS selector |
+| `cssgraph impact <className>` | `cssgraph_impact` | Blast radius of changing a className |
+| `cssgraph callers <className>` | `cssgraph_callers` | Find JSX components that reference a className |
+
+### Diagnostics
+
+| CLI | MCP tool | What it does |
+|-----|----------|-------------|
+| `cssgraph cascade <className>` | `cssgraph_cascade` | Visualize cascade path (all definitions with specificity) |
+| `cssgraph property <query>` | `cssgraph_property` | Search selectors by CSS property value |
+| `cssgraph unused` | `cssgraph_unused` | Find class selectors with no incoming references |
+| `cssgraph files` | `cssgraph_files` | List project style file structure |
+| `cssgraph status` | `cssgraph_status` | Index statistics
+
 ## 5. Auto-sync
 
 After initialization, the MCP server watches your project using native OS file events (FSEvents on macOS, inotify on Linux, ReadDirectoryChangesW on Windows). File changes are debounced (2-second quiet window by default) and incrementally synced — **the index stays current as you code.**
