@@ -148,7 +148,6 @@ The MCP server (`cssgraph serve --mcp`) exposes these to your AI agent.
 |-----|----------|-------------|
 | `cssgraph impact-selector <selector>` | `cssgraph_impact_selector` | Find code files (JS/TS/JSX/TSX) affected by a CSS selector |
 | `cssgraph impact <className>` | `cssgraph_impact` | Blast radius of changing a className |
-| `cssgraph callers <className>` | `cssgraph_callers` | Find JSX components that reference a className |
 
 ### Diagnostics
 
@@ -158,7 +157,7 @@ The MCP server (`cssgraph serve --mcp`) exposes these to your AI agent.
 | `cssgraph property <query>` | `cssgraph_property` | Search selectors by CSS property value |
 | `cssgraph unused` | `cssgraph_unused` | Find class selectors with no incoming references |
 | `cssgraph files` | `cssgraph_files` | List project style file structure |
-| `cssgraph status` | `cssgraph_status` | Index statistics
+| `cssgraph status` | `cssgraph_status` | Index statistics |
 
 ## 5. Auto-sync
 

@@ -145,6 +145,8 @@ cssgraph status [path]               # Index statistics
 cssgraph sync [path]                 # Incremental update
 cssgraph serve --mcp                 # Start MCP server
 cssgraph install                     # Auto-wire to your AI agent
+cssgraph uninstall                   # Remove from your AI agent
+cssgraph version                     # Print installed version
 ```
 
 ### `--jsx` flag
