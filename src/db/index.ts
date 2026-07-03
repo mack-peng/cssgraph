@@ -106,6 +106,12 @@ export class DatabaseConnection {
     try { this.db.close(); } catch { /* already closed */ }
   }
 
+  /** Close the DB, delete all files, and re-open with a fresh schema. */
+  static reinitialize(dbPath: string): DatabaseConnection {
+    removeDatabaseFiles(dbPath);
+    return DatabaseConnection.initialize(dbPath);
+  }
+
   isReplacedOnDisk(): boolean {
     return false;
   }

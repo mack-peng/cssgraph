@@ -378,13 +378,6 @@ export class QueryBuilder {
   // Helpers
   // ===========================================================================
 
-  clear(): void {
-    this.db.exec('DELETE FROM edges');
-    this.db.exec('DELETE FROM unresolved_refs');
-    this.db.exec('DELETE FROM nodes');
-    this.db.exec('DELETE FROM files');
-  }
-
   private rowToNode(row: Record<string, unknown>): Node {
     return {
       id: row['id'] as string,

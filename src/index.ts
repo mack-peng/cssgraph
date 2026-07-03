@@ -307,6 +307,10 @@ export class CodeGraph {
     this.db.getDb().exec('BEGIN');
     let fileCountInBatch = 0;
     let globalIdx = 0;
+    let nextSeq = 0;
+    const storeCursor = { current: 0 };
+    interface StoreItem { filePath: string; source: string; contentHash: string; result: import('./types').ExtractionResult; }
+    const completed = new Map<number, StoreItem>();
 
     for (let bi = 0; bi < orderedFiles.length; bi += FILE_IO_BATCH_SIZE) {
       if (options.signal?.aborted) break;
@@ -454,48 +458,52 @@ export class CodeGraph {
           continue;
         }
 
-        this.db.getDb().exec('SAVEPOINT sp');
+        // Buffer result for ordered commit — future Worker pool parses out-of-order
+        // but store stays in file order (classSelectorMap, edge determinism).
+        const seq = nextSeq++;
+        completed.set(seq, { filePath, source, contentHash, result });
+        CodeGraph.flushOrdered(completed, storeCursor, (item) => {
+          this.db.getDb().exec('SAVEPOINT sp');
 
-        for (const node of result.nodes) {
-          this.queries.insertNode(node);
-          totalNodes++;
-          if (node.kind === 'class_selector' && !node.name.startsWith('#')) {
-            const list = classSelectorMap.get(node.name) || [];
-            list.push(node.id);
-            classSelectorMap.set(node.name, list);
+          for (const node of item.result.nodes) {
+            this.queries.insertNode(node);
+            totalNodes++;
+            if (node.kind === 'class_selector' && !node.name.startsWith('#')) {
+              const list = classSelectorMap.get(node.name) || [];
+              list.push(node.id);
+              classSelectorMap.set(node.name, list);
+            }
           }
-        }
-        for (const edge of result.edges) {
-          this.queries.insertEdge(edge);
-          totalEdges++;
-        }
-
-        const fileRecord: FileRecord = {
-          path: filePath,
-          contentHash,
-          language: detectLanguage(filePath),
-          size: source.length,
-          modifiedAt: Date.now(),
-          indexedAt: Date.now(),
-          nodeCount: result.nodes.length,
-          errors: result.errors.length > 0 ? result.errors : undefined,
-        };
-        this.queries.insertFile(fileRecord);
-
-        this.db.getDb().exec('RELEASE sp');
-
-        filesIndexed++;
-        if (result.errors.length > 0) allErrors.push(...result.errors);
-        globalIdx++;
-
-        fileCountInBatch++;
-        if (fileCountInBatch >= SAVEPOINT_BATCH_SIZE) {
-          this.db.getDb().exec('COMMIT');
-          this.db.getDb().exec('BEGIN');
-          fileCountInBatch = 0;
+          for (const edge of item.result.edges) {
+            this.queries.insertEdge(edge);
+            totalEdges++;
           }
+
+          this.queries.insertFile({
+            path: item.filePath,
+            contentHash: item.contentHash,
+            language: detectLanguage(item.filePath),
+            size: item.source.length,
+            modifiedAt: Date.now(),
+            indexedAt: Date.now(),
+            nodeCount: item.result.nodes.length,
+            errors: item.result.errors.length > 0 ? item.result.errors : undefined,
+          });
+
+          this.db.getDb().exec('RELEASE sp');
+
+          filesIndexed++;
+          if (item.result.errors.length > 0) allErrors.push(...item.result.errors);
+          globalIdx++;
+
+          fileCountInBatch++;
+          if (fileCountInBatch >= SAVEPOINT_BATCH_SIZE) {
+            this.db.getDb().exec('COMMIT');
+            this.db.getDb().exec('BEGIN');
+            fileCountInBatch = 0;
+          }
+        });
         } catch (err) {
-          try { this.db.getDb().exec('ROLLBACK TO sp'); } catch { /* not in SAVEPOINT */ }
           filesErrored++;
           globalIdx++;
           allErrors.push({
@@ -721,8 +729,42 @@ export class CodeGraph {
   }
 
   // ===========================================================================
+  // Store helpers (for Worker-pool decoupling)
+  // ===========================================================================
+
+  /** Commit completed items in file-order using a sequence-number buffer.
+   *  Today parse is serial so flushOrdered always drains in one call; the
+   *  Map buffer exists so the Worker pool can deliver results out-of-order
+   *  while store stays sequential. */
+  private static flushOrdered<T>(
+    completed: Map<number, T>,
+    cursor: { current: number },
+    fn: (item: T) => void,
+  ): number {
+    let flushed = 0;
+    while (completed.has(cursor.current)) {
+      fn(completed.get(cursor.current)!);
+      completed.delete(cursor.current);
+      cursor.current++;
+      flushed++;
+    }
+    return flushed;
+  }
+
+  // ===========================================================================
   // Cleanup
   // ===========================================================================
+
+  /** Close, delete the DB, and rebuild from scratch. Much faster than DELETE. */
+  reinit(): void {
+    this.close();
+    const dbPath = getDatabasePath(this.projectRoot);
+    this.db = DatabaseConnection.reinitialize(dbPath);
+    this.queries = new QueryBuilder(this.db.getDb());
+    this.traverser = new GraphTraverser(this.queries);
+    this.graphQueries = new GraphQueryManager(this.queries);
+    this.contextBuilder = createContextBuilder(this.projectRoot, this.queries, this.traverser);
+  }
 
   uninitialize(): void {
     this.close();

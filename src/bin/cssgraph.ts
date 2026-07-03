@@ -163,7 +163,9 @@ program
 
       const { default: CodeGraph } = await import('../index');
       const cg = await CodeGraph.open(projectPath);
-      (cg as any)['queries']['clear']();
+
+      if (!options.quiet) phase('Cleaning existing data');
+      cg.reinit();
 
       let scanTotal = 0;
       let lastPhase = '';
