@@ -200,8 +200,11 @@ export class CodeGraph {
     }
     ig.add(['node_modules', 'dist', 'build', '.git', '.next', '.cssgraph', '.codegraph']);
 
-    const scanFiles = (rootDir: string): string[] => {
-      const results: string[] = [];
+    // Collect files into buckets in a single pass — no separate filter() passes.
+    const styleFiles: string[] = [];
+    const jsxFiles: string[] = [];
+
+    const scanFiles = (rootDir: string): void => {
       const stack: string[] = [rootDir];
       while (stack.length > 0) {
         const dir = stack.pop()!;
@@ -214,21 +217,23 @@ export class CodeGraph {
             stack.push(fullPath);
           } else if (entry.isFile()) {
             const lang = detectLanguage(relativePath);
-            if (isLanguageSupported(lang)) {
-              results.push(relativePath);
+            if (!isLanguageSupported(lang)) continue;
+            if (isJSXFile(relativePath)) {
+              jsxFiles.push(relativePath);
+            } else {
+              styleFiles.push(relativePath);
             }
           }
         }
       }
-      return results;
     };
 
-    const allFiles = scanFiles(this.projectRoot);
-    const styleFiles = allFiles.filter(f => !isJSXFile(f));
-    const jsxFiles = options.jsx ? allFiles.filter(f => isJSXFile(f)) : [];
+    scanFiles(this.projectRoot);
 
-    // Ensure style files are indexed before JSX files so class selectors exist for references.
-    const orderedFiles = [...styleFiles, ...jsxFiles];
+    // Style files must be indexed before JSX files so class selectors exist for references.
+    const orderedFiles = options.jsx
+      ? [...styleFiles, ...jsxFiles]
+      : styleFiles;
 
     if (options.onProgress) {
       options.onProgress({ phase: 'scanning', current: orderedFiles.length, total: orderedFiles.length });
