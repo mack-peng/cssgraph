@@ -37,10 +37,15 @@ Requires Node.js >= 22.5.0 (for built-in `node:sqlite`).
 
 ```bash
 cd your-project
-cssgraph init
+cssgraph init --jsx
 ```
 
-`cssgraph init` creates the local `.cssgraph/` directory and builds the full style graph in one step. Supports CSS, SCSS, Less, Sass (indented), and PostCSS custom syntaxes.
+This indexes all style files (CSS, SCSS, Less, Sass, PostCSS) **plus** JSX/TSX
+className references, CSS-in-JS, and CSS Modules — enabling every MCP tool
+including `cssgraph_callers`, `cssgraph_rule`, and `cssgraph_impact_selector`.
+
+Just style files? Skip `--jsx` for a faster ~45s index. You can always
+add JSX references later with `cssgraph index --jsx`.
 
 ### 3. Add to your agent (MCP)
 

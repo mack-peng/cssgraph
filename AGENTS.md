@@ -110,6 +110,20 @@ files       → PostCSS / CSS-in-JS / JSX extractors
 
 Plus `.cssgraph.json` project-level `exclude` patterns.
 
+## Usage flow
+
+First-time setup:
+```bash
+cssgraph init --jsx      # index style + JSX files (~3m)
+cssgraph serve --mcp      # start MCP server (auto-syncs changes)
+```
+
+After checkout or edits:
+```bash
+cssgraph sync            # incremental update (~2s)
+cssgraph index --jsx     # full re-index (if index corrupt or version bump)
+```
+
 ## Performance
 
 Production monorepo (~9,400 files — 1,500 style + 7,900 JS/TS/JSX/es6):

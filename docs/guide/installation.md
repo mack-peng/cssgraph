@@ -85,10 +85,14 @@ Restart your agent for the MCP server to load. Once restarted, the agent will se
 
 ```bash
 cd your-project
-cssgraph init
+cssgraph init --jsx
 ```
 
-`cssgraph init` creates the local `.cssgraph/` directory and builds the full style graph in one step.
+Indexes all style files **plus** JSX/TSX/JS/TS className references,
+CSS-in-JS, and CSS Modules — one command enables every MCP tool.
+
+Just style files? Skip `--jsx` for a faster ~45s index. You can always
+add JSX references later with `cssgraph index --jsx`.
 
 ### What gets indexed
 
@@ -104,11 +108,9 @@ By default, `cssgraph` indexes CSS, SCSS, Less, and Sass files. Excluded by defa
 
 ### Indexing with JSX/TSX support
 
-To also scan `.jsx`, `.tsx`, `.js`, `.ts`, and `.es6` files for className references and CSS modules:
-
-```bash
-cssgraph index --jsx
-```
+`cssgraph init --jsx` (recommended) or `cssgraph index --jsx` scans
+`.jsx`, `.tsx`, `.js`, `.ts`, and `.es6` files for className references
+and CSS modules:
 
 This enables the `cssgraph_rule` / `cssgraph_callers` tools to report which component files reference each className. Style files are always indexed first so references can be matched.
 
