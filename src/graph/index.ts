@@ -17,7 +17,7 @@ export interface SelectorImpactResult {
 }
 
 export function normalizeSelector(selector: string): string {
-  return selector.trim().replace(/\s+/g, ' ');
+  return selector.trim().replace(/\s+/g, ' ').replace(/\s*,\s*/g, ', ');
 }
 
 /** Replace hashed CSS Module class names with original names using the hash map. */

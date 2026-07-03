@@ -385,13 +385,17 @@ export function extractFromSource(filePath: string, source: string): ExtractionR
         for (const nested of nestedRules) {
           const parentNodes = selectorNodeMap.get(fullSelector) || [];
 
+          // Pass the fully-resolved parent selectors (not raw rule.selectors
+          // which still contain unexpanded & references).
+          const resolvedParents = fullSelector.split(', ').map(s => s.trim());
+
           walkRules([nested], {
-            parentSelectors: rule.selectors,
+            parentSelectors: resolvedParents,
             atRules: context.atRules,
           });
 
           const childSelector = buildFullSelector(nested, {
-            parentSelectors: rule.selectors,
+            parentSelectors: resolvedParents,
             atRules: context.atRules,
           });
           const childNodes = selectorNodeMap.get(childSelector) || [];
