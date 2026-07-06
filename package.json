@@ -45,8 +45,10 @@
   },
   "homepage": "https://github.com/mack-peng/cssgraph#readme",
   "dependencies": {
+    "@clack/prompts": "^1.7.0",
     "commander": "^14.0.2",
     "ignore": "^7.0.5",
+    "jsonc-parser": "^3.3.1",
     "picomatch": "^4.0.3",
     "postcss": "^8.5.16",
     "postcss-less": "^6.0.0",
@@ -59,7 +61,7 @@
     "@types/better-sqlite3": "^7.6.0",
     "@types/node": "^20.19.30",
     "typescript": "^5.0.0",
-    "vitest": "^2.1.9"
+    "vitest": "^3.2.7"
   },
   "engines": {
     "node": ">=22.5.0 <25.0.0"

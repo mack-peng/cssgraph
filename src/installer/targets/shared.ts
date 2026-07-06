@@ -1,38 +1,255 @@
+/**
+ * Helpers shared across `AgentTarget` implementations.
+ *
+ * Lifted from the original `config-writer.ts` so each target can
+ * compose them without inheritance. Kept deliberately small — the
+ * targets are different enough (JSON vs TOML vs Markdown, varying
+ * idempotency markers) that a base class would force the awkward
+ * shape onto everyone.
+ */
+
 import * as fs from 'fs';
 import * as path from 'path';
+import {
+  CSSGRAPH_INSTRUCTIONS_BLOCK,
+  CSSGRAPH_SECTION_START,
+  CSSGRAPH_SECTION_END,
+} from '../instructions-template';
 
+/**
+ * The MCP-server config block cssgraph injects. Same shape across
+ * all JSON-shaped agent configs (Claude, Cursor, opencode), only the
+ * surrounding wrapper differs. Codex (TOML) builds its own block.
+ */
+export function getMcpServerConfig(): { type: string; command: string; args: string[] } {
+  return {
+    type: 'stdio',
+    command: 'cssgraph',
+    args: ['serve', '--mcp'],
+  };
+}
+
+/**
+ * Permissions list for Claude `settings.json`. Other targets that
+ * have a permissions concept can compose this list directly.
+ *
+ * One server-scoped wildcard rather than a per-tool list. By default only
+ * `cssgraph_explore` is even LISTED to the agent, so in practice explore is
+ * the only tool this auto-approves — but the wildcard means that if a user
+ * re-enables another tool, it's already pre-approved, and future tools are
+ * covered too.
+ */
+export function getCodeGraphPermissions(): string[] {
+  return ['mcp__cssgraph__*'];
+}
+
+/**
+ * Read a JSON file, returning `{}` when missing or unparseable.
+ *
+ * Unparseable files are backed up to `<path>.backup` BEFORE we return
+ * `{}` — so an idempotent re-run never silently deletes a user's
+ * existing config that happened to break JSON parse temporarily.
+ */
+export function readJsonFile(filePath: string): Record<string, any> {
+  if (!fs.existsSync(filePath)) {
+    return {};
+  }
+  try {
+    return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`  Warning: Could not parse ${path.basename(filePath)}: ${msg}`);
+    console.warn(`  A backup will be created before overwriting.`);
+    try {
+      fs.copyFileSync(filePath, filePath + '.backup');
+    } catch { /* ignore backup failure */ }
+    return {};
+  }
+}
+
+/**
+ * Write a file atomically: write to `<path>.tmp.<pid>`, then rename.
+ *
+ * Prevents corruption if the process crashes mid-write. The temp
+ * file is cleaned up on rename failure.
+ */
 export function atomicWriteFileSync(filePath: string, content: string): void {
   const dir = path.dirname(filePath);
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
-  const tmpPath = filePath + '.tmp-' + process.pid;
-  fs.writeFileSync(tmpPath, content, 'utf-8');
-  fs.renameSync(tmpPath, filePath);
+  const tmpPath = filePath + '.tmp.' + process.pid;
+  try {
+    fs.writeFileSync(tmpPath, content);
+    fs.renameSync(tmpPath, filePath);
+  } catch (err) {
+    try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
+    throw err;
+  }
 }
 
+/**
+ * Atomic JSON write. Trailing newline matches the convention every
+ * existing target had — preserves diff-friendly file shape.
+ */
+export function writeJsonFile(filePath: string, data: Record<string, any>): void {
+  atomicWriteFileSync(filePath, JSON.stringify(data, null, 2) + '\n');
+}
+
+/**
+ * Check whether a directory was likely created by a previous cssgraph install
+ * run rather than by the actual agent tooling. Avoids the self-fulfilling
+ * detection loop: cssgraph creates the dir → "detected" → re-installs forever.
+ *
+ * Returns true if the directory exists and every regular file inside it
+ * contains a cssgraph marker (i.e., we wrote everything in there).
+ * Returns false if the dir doesn't exist, is empty, or has native files.
+ */
+export function directoryIsCssgraphOnly(dirPath: string): boolean {
+  try {
+    const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+    let foundCssgraphMarker = false;
+    for (const entry of entries) {
+      if (!entry.isFile()) continue;
+      const content = fs.readFileSync(path.join(dirPath, entry.name), 'utf-8');
+      if (content.includes('cssgraph')) {
+        foundCssgraphMarker = true;
+      } else {
+        // Found a non-cssgraph file — this dir has native content.
+        return false;
+      }
+    }
+    return foundCssgraphMarker;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Compare two JSON values for deep equality, ignoring key order.
+ *
+ * Used for idempotency: when the on-disk config already exactly
+ * matches what we'd write, return action=`unchanged` instead of
+ * re-writing (and emitting a confusing "Updated" log line).
+ */
 export function jsonDeepEqual(a: unknown, b: unknown): boolean {
-  return JSON.stringify(a) === JSON.stringify(b);
+  if (a === b) return true;
+  if (typeof a !== typeof b) return false;
+  if (a === null || b === null) return a === b;
+  if (typeof a !== 'object') return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  if (Array.isArray(a) && Array.isArray(b)) {
+    if (a.length !== b.length) return false;
+    return a.every((v, i) => jsonDeepEqual(v, b[i]));
+  }
+  const ao = a as Record<string, unknown>;
+  const bo = b as Record<string, unknown>;
+  const ak = Object.keys(ao).sort();
+  const bk = Object.keys(bo).sort();
+  if (ak.length !== bk.length) return false;
+  if (!ak.every((k, i) => k === bk[i])) return false;
+  return ak.every((k) => jsonDeepEqual(ao[k], bo[k]));
 }
 
+/**
+ * Replace or append a marker-delimited section in a markdown-ish file.
+ *
+ * Used by Claude / Codex / opencode for the `<!-- CSSGRAPH_START --> ... <!--
+ * CSSGRAPH_END -->` block. Preserves all content outside the
+ * markers verbatim.
+ *
+ * Returns `created` when the file didn't exist; `updated` when
+ * markers were found and content swapped; `appended` when markers
+ * weren't found and section was added at end. `unchanged` when the
+ * existing block already matches `body`.
+ */
+export function replaceOrAppendMarkedSection(
+  filePath: string,
+  body: string,
+  startMarker: string,
+  endMarker: string,
+): 'created' | 'updated' | 'appended' | 'unchanged' {
+  if (!fs.existsSync(filePath)) {
+    atomicWriteFileSync(filePath, body + '\n');
+    return 'created';
+  }
+
+  const content = fs.readFileSync(filePath, 'utf-8');
+  const startIdx = content.indexOf(startMarker);
+  const endIdx = content.indexOf(endMarker, startIdx + startMarker.length);
+
+  if (startIdx !== -1 && endIdx > startIdx) {
+    const existingBlock = content.substring(startIdx, endIdx + endMarker.length).trimEnd();
+    if (existingBlock === body.trimEnd()) {
+      return 'unchanged';
+    }
+    const before = content.substring(0, startIdx);
+    const after = content.substring(endIdx + endMarker.length);
+    atomicWriteFileSync(filePath, before + body + after);
+    return 'updated';
+  }
+
+  // No markers — append. Preserve existing content with a separating
+  // blank line.
+  const trimmed = content.trimEnd();
+  const sep = trimmed.length > 0 ? '\n\n' : '';
+  atomicWriteFileSync(filePath, trimmed + sep + body + '\n');
+  return 'appended';
+}
+
+/**
+ * Upsert the cssgraph instructions block into an agent instructions
+ * file (CLAUDE.md / AGENTS.md / GEMINI.md). The one write shared by
+ * every target: self-heals a stale block (markers match →
+ * replaced by the current one), appends after existing user
+ * content otherwise, and reports `unchanged` on byte-equal re-runs so
+ * install stays idempotent.
+ */
+export function upsertInstructionsEntry(file: string): { path: string; action: 'created' | 'updated' | 'unchanged' } {
+  const action = replaceOrAppendMarkedSection(
+    file,
+    CSSGRAPH_INSTRUCTIONS_BLOCK,
+    CSSGRAPH_SECTION_START,
+    CSSGRAPH_SECTION_END,
+  );
+  return { path: file, action: action === 'appended' ? 'updated' : action };
+}
+
+/**
+ * Inverse of `replaceOrAppendMarkedSection`. Strips the marker
+ * block from `filePath` if present. If the file becomes empty after
+ * removal, deletes the file entirely.
+ *
+ * Returns `removed` when content was stripped, `not-found` when
+ * the markers weren't present, `kept` when the file didn't exist.
+ */
 export function removeMarkedSection(
   filePath: string,
   startMarker: string,
   endMarker: string,
-): 'removed' | 'unchanged' | 'not-found' {
-  if (!fs.existsSync(filePath)) return 'not-found';
+): 'removed' | 'not-found' | 'kept' {
+  if (!fs.existsSync(filePath)) return 'kept';
 
-  const content = fs.readFileSync(filePath, 'utf-8');
+  let content: string;
+  try {
+    content = fs.readFileSync(filePath, 'utf-8');
+  } catch {
+    return 'kept';
+  }
+
   const startIdx = content.indexOf(startMarker);
   if (startIdx === -1) return 'not-found';
-
   const endIdx = content.indexOf(endMarker, startIdx + startMarker.length);
-  if (endIdx === -1) return 'not-found';
+  if (endIdx === -1 || endIdx <= startIdx) return 'not-found';
 
-  // Remove the block including the markers and any trailing newline
-  let newContent = content.slice(0, startIdx) + content.slice(endIdx + endMarker.length);
-  newContent = newContent.replace(/\n{3,}/g, '\n\n').trim() + '\n';
+  const before = content.substring(0, startIdx).trimEnd();
+  const after = content.substring(endIdx + endMarker.length).trimStart();
+  const joined = before + (before && after ? '\n\n' : '') + after;
 
-  atomicWriteFileSync(filePath, newContent);
+  if (joined.trim() === '') {
+    try { fs.unlinkSync(filePath); } catch { /* ignore */ }
+  } else {
+    atomicWriteFileSync(filePath, joined.trim() + '\n');
+  }
   return 'removed';
 }

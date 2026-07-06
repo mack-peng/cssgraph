@@ -7,24 +7,30 @@ instead of grep/Read loops.
 
 ### Primary tool
 
-**cssgraph_explore** — the ONLY tool you need for most CSS questions.
+**cssgraph\_explore** — the ONLY tool you need for most CSS questions.
 "what styles affect .btn-primary", "where is .container defined", or surveying
 an area — one call returns the className's full properties, overrides,
-specificity, and callers grouped by file.
+specificity, source context, and callers grouped by file.
 
 ### Other tools (use only when explore isn't enough)
 
-- **cssgraph_search** — quick className name search
-- **cssgraph_callers** — find JSX components using a className
-- **cssgraph_impact** — blast radius of changing a className or property
-- **cssgraph_rule** — blast radius of a full CSS selector (exact, related, loose/strict impact)
-- **cssgraph_impact_selector** — find code files (JS/TS/JSX/TSX) affected by a CSS selector
-- **cssgraph_details** — quick O(1) exact selector lookup, no edges/impact (lightweight)
-- **cssgraph_unused** — find CSS class selectors with no incoming references
-- **cssgraph_cascade** — visualize the cascade path for a className
-- **cssgraph_property** — search selectors by CSS property value
-- **cssgraph_files** — indexed style file tree
-- **cssgraph_status** — index health check
+- **cssgraph\_search** — quick className name search
+- **cssgraph\_callers** — find JSX components using a className
+- **cssgraph\_impact** — blast radius of changing a className
+- **cssgraph\_rule** — blast radius of a full CSS selector (exact, related, loose/strict impact)
+- **cssgraph\_impact\_selector** — find code files (JS/TS/JSX/TSX) affected by a CSS selector
+- **cssgraph\_details** — quick O(1) exact selector lookup, no edges/impact (lightweight)
+- **cssgraph\_unused** — find CSS class selectors with no incoming references
+- **cssgraph\_cascade** — visualize the cascade path for a className
+- **cssgraph\_property** — search selectors by CSS property value
+- **cssgraph\_files** — indexed style file tree
+- **cssgraph\_status** — index health check
+
+### projectPath
+
+All tools accept an optional \`projectPath\` argument — pass it to query a
+specific project's \`.cssgraph/\` index. When omitted, cssgraph walks up from
+the current working directory to find the nearest initialized project.
 
 ### Anti-patterns
 

@@ -329,6 +329,19 @@ export class CodeGraph {
     }
 
     this.db.getDb().exec('BEGIN');
+
+    // Incremental mode: delete old nodes before re-indexing changed files.
+    // Edges cascade-delete via FK on nodes.id.
+    if (fileFilter) {
+      // Only delete nodes for style files (non-JSX), since JSX file nodes
+      // carry the file node ID as a stable hash — they're idempotent by REPLACE.
+      for (const fp of fileFilter) {
+        if (!isJSXFile(fp)) {
+          this.queries.deleteNodesByFile(fp);
+        }
+      }
+    }
+
     let fileCountInBatch = 0;
     let globalIdx = 0;
     let nextSeq = 0;
@@ -621,8 +634,11 @@ export class CodeGraph {
         const dbFileHashes = new Map(dbFiles.map(f => [f.path, f.contentHash]));
         const gitFileSet = new Set(gitFiles);
 
-        // Removed files.
+        // Removed files — delete nodes (edges cascade via FK).
         const removed = dbFiles.filter(f => !gitFileSet.has(f.path));
+        for (const r of removed) {
+          this.queries.deleteNodesByFile(r.path);
+        }
         for (const r of removed) this.queries.deleteFile(r.path);
 
         // Added + potentially modified files.

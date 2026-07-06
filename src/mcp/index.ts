@@ -1,8 +1,10 @@
 import * as readline from 'readline';
 import { SERVER_INSTRUCTIONS } from './server-instructions';
+import { MCPServer as ToolHandler, getToolDefinitions } from './tools';
 
 export class MCPServer {
   private rl: readline.Interface | null = null;
+  private handler = new ToolHandler();
 
   async run(): Promise<void> {
     this.rl = readline.createInterface({
@@ -46,9 +48,9 @@ export class MCPServer {
             },
             serverInfo: {
               name: 'cssgraph',
-              version: '0.1.0',
+              version: '0.2.4',
             },
-            instructions: this.getInstructions(),
+            instructions: SERVER_INSTRUCTIONS,
           },
         });
         break;
@@ -59,7 +61,7 @@ export class MCPServer {
           jsonrpc: '2.0',
           id,
           result: {
-            tools: this.getToolDefinitions(),
+            tools: getToolDefinitions(),
           },
         });
         break;
@@ -80,6 +82,10 @@ export class MCPServer {
     const toolName = params?.['name'] as string;
     const args = params?.['arguments'] as Record<string, unknown> ?? {};
 
+    // Each tool handler internally handles recoverable conditions
+    // (not initialized, not found) and returns success-shaped guidance.
+    // The try/catch here is only for unexpected errors (genuine malfunctions),
+    // which are marked isError — per spec R32.
     try {
       const result = await this.executeTool(toolName, args);
       this.send({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: result }] } });
@@ -88,7 +94,7 @@ export class MCPServer {
         jsonrpc: '2.0',
         id,
         result: {
-          content: [{ type: 'text', text: `cssgraph error: ${err instanceof Error ? err.message : String(err)}` }],
+          content: [{ type: 'text', text: `cssgraph internal error: ${err instanceof Error ? err.message : String(err)}\n\nThis is an unexpected error — please report it.` }],
           isError: true,
         },
       });
@@ -96,403 +102,24 @@ export class MCPServer {
   }
 
   private async executeTool(name: string, args: Record<string, unknown>): Promise<string> {
-    const cwd = process.env.CSSGRAPH_PROJECT_PATH || process.cwd();
-
     switch (name) {
-      case 'cssgraph_explore': {
-        const query = args['query'] as string || '';
-        const { default: CodeGraph } = await import('../index');
-        const root = CodeGraph.isInitialized(cwd) ? cwd : (await this.findRoot(cwd));
-        if (!root) return 'cssgraph is not initialized in this project. Run "cssgraph init" first.';
-        const cg = await CodeGraph.open(root);
-        try {
-          return cg.explore(query, (args['maxFiles'] as number) ?? 12);
-        } finally {
-          cg.destroy();
-        }
-      }
-      case 'cssgraph_search': {
-        const query = args['query'] as string || '';
-        const { default: CodeGraph } = await import('../index');
-        const root = CodeGraph.isInitialized(cwd) ? cwd : (await this.findRoot(cwd));
-        if (!root) return 'cssgraph is not initialized. Run "cssgraph init" first.';
-        const cg = await CodeGraph.open(root);
-        try {
-          const results = cg.searchNodes(query, { limit: 10 });
-          if (results.length === 0) return 'No results found.';
-          return results.map(r => `${r.node.kind}: ${r.node.name} (${r.node.filePath}:${r.node.startLine})`).join('\n');
-        } finally {
-          cg.destroy();
-        }
-      }
-      case 'cssgraph_callers': {
-        const className = args['className'] as string || '';
-        const { default: CodeGraph } = await import('../index');
-        const root = CodeGraph.isInitialized(cwd) ? cwd : (await this.findRoot(cwd));
-        if (!root) return 'cssgraph is not initialized.';
-        const cg = await CodeGraph.open(root);
-        try {
-          const results = cg.searchNodes(className, { limit: 1 });
-          if (results.length === 0) return 'No results found.';
-          const callers = cg.getCallers(results[0]!.node.id, 2);
-          if (callers.length === 0) return 'No callers found.';
-          return callers.map(c => `${c.node.kind}: ${c.node.name} (${c.node.filePath}:${c.node.startLine})`).join('\n');
-        } finally {
-          cg.destroy();
-        }
-      }
-      case 'cssgraph_impact': {
-        const className = args['className'] as string || '';
-        const { default: CodeGraph } = await import('../index');
-        const root = CodeGraph.isInitialized(cwd) ? cwd : (await this.findRoot(cwd));
-        if (!root) return 'cssgraph is not initialized.';
-        const cg = await CodeGraph.open(root);
-        try {
-          const results = cg.searchNodes(className, { limit: 1 });
-          if (results.length === 0) return 'No results found.';
-          const subgraph = cg.getImpactRadius(results[0]!.node.id, 3);
-          const lines: string[] = [];
-          for (const [, node] of subgraph.nodes) {
-            lines.push(`${node.kind}: ${node.name} (${node.filePath}:${node.startLine})`);
-          }
-          return lines.join('\n') || 'No impact found.';
-        } finally {
-          cg.destroy();
-        }
-      }
-      case 'cssgraph_files': {
-        const { default: CodeGraph } = await import('../index');
-        const root = CodeGraph.isInitialized(cwd) ? cwd : (await this.findRoot(cwd));
-        if (!root) return 'cssgraph is not initialized.';
-        const cg = await CodeGraph.open(root);
-        try {
-          const files = cg.getFiles();
-          if (files.length === 0) return 'No style files indexed.';
-          return files.map(f => `${f.language.padEnd(6)} ${f.path} (${f.nodeCount} nodes)`).join('\n');
-        } finally {
-          cg.destroy();
-        }
-      }
-      case 'cssgraph_status': {
-        const { default: CodeGraph } = await import('../index');
-        const root = CodeGraph.isInitialized(cwd) ? cwd : (await this.findRoot(cwd));
-        if (!root) return 'cssgraph is not initialized.';
-        const cg = await CodeGraph.open(root);
-        try {
-          const stats = cg.getStats();
-          return `Nodes: ${stats.nodeCount} | Edges: ${stats.edgeCount} | Files: ${stats.fileCount}`;
-        } finally {
-          cg.destroy();
-        }
-      }
-      case 'cssgraph_unused': {
-        const { default: CodeGraph } = await import('../index');
-        const root = CodeGraph.isInitialized(cwd) ? cwd : (await this.findRoot(cwd));
-        if (!root) return 'cssgraph is not initialized.';
-        const cg = await CodeGraph.open(root);
-        try {
-          const limit = Math.min((args['limit'] as number) ?? 50, 200);
-          const results = cg.findUnusedClassSelectors().slice(0, limit);
-          if (results.length === 0) return 'No unused class selectors found.';
-          return results.map(r => `${r.node.name} (${r.node.filePath}:${r.node.startLine})`).join('\n');
-        } finally {
-          cg.destroy();
-        }
-      }
-      case 'cssgraph_cascade': {
-        const className = args['className'] as string || '';
-        const { default: CodeGraph } = await import('../index');
-        const root = CodeGraph.isInitialized(cwd) ? cwd : (await this.findRoot(cwd));
-        if (!root) return 'cssgraph is not initialized.';
-        const cg = await CodeGraph.open(root);
-        try {
-          const result = cg.getCascade(className);
-          if (result.steps.length === 0) return `No cascade data found for "${className}".`;
-          const lines: string[] = [`Cascade path for "${className}":`];
-          for (let i = 0; i < result.steps.length; i++) {
-            const s = result.steps[i]!;
-            const spec = s.specificity ? `[${s.specificity.join(', ')}]` : '';
-            lines.push(`${i + 1}. ${s.node.selector ?? s.node.name} ${spec} (${s.node.filePath}:${s.node.startLine})`);
-            if (s.properties.length > 0) {
-              lines.push(`   ${s.properties.map(p => `${p.property}: ${p.value}`).join('; ')}`);
-            }
-          }
-          return lines.join('\n');
-        } finally {
-          cg.destroy();
-        }
-      }
-      case 'cssgraph_property': {
-        const property = args['property'] as string | undefined;
-        const value = args['value'] as string || '';
-        const { default: CodeGraph } = await import('../index');
-        const root = CodeGraph.isInitialized(cwd) ? cwd : (await this.findRoot(cwd));
-        if (!root) return 'cssgraph is not initialized.';
-        const cg = await CodeGraph.open(root);
-        try {
-          const limit = Math.min((args['limit'] as number) ?? 50, 200);
-          const exact = (args['exact'] as boolean) ?? false;
-          const results = cg.searchByPropertyValue({ property, value, exact, limit });
-          if (results.length === 0) return `No results found for property value "${value}".`;
-          return results.map(r => {
-            const selector = r.selectorNode?.selector ?? r.selectorNode?.name ?? '—';
-            return `${selector} — ${r.node.name}: ${r.node.value} (${r.node.filePath}:${r.node.startLine})`;
-          }).join('\n');
-        } finally {
-          cg.destroy();
-        }
-      }
-      case 'cssgraph_rule': {
-        const selector = args['selector'] as string || '';
-        const { default: CodeGraph } = await import('../index');
-        const root = CodeGraph.isInitialized(cwd) ? cwd : (await this.findRoot(cwd));
-        if (!root) return 'cssgraph is not initialized.';
-        const cg = await CodeGraph.open(root);
-        try {
-          const result = cg.analyzeRule(selector);
-          if (result.exactMatches.length === 0 && result.containsMatches.length === 0 && result.classUsage.length === 0) {
-            return `No rules found matching "${selector}".`;
-          }
-
-          const lines: string[] = [`Rule: ${selector}\n`];
-
-          if (result.exactMatches.length > 0) {
-            lines.push('Exact matches:');
-            for (const m of result.exactMatches) {
-              lines.push(`  ${m.node.selector ?? m.node.name} — ${m.node.filePath}:${m.node.startLine}`);
-            }
-            lines.push('');
-          }
-
-          if (result.containsMatches.length > 0) {
-            lines.push('Related selectors:');
-            for (const m of result.containsMatches) {
-              lines.push(`  ${m.node.selector ?? m.node.name} — ${m.node.filePath}:${m.node.startLine}`);
-            }
-            lines.push('');
-          }
-
-          lines.push('Class usage:');
-          for (const u of result.classUsage) {
-            lines.push(`  .${u.className} → ${u.files.length} files`);
-          }
-          lines.push('');
-
-          lines.push(`Loose impact: ${result.looseFiles.length} files`);
-          lines.push(`Strict impact: ${result.strictFiles.length} files`);
-          for (const f of result.strictFiles.slice(0, 20)) {
-            lines.push(`  ${f}`);
-          }
-          if (result.strictFiles.length > 20) {
-            lines.push(`  ... and ${result.strictFiles.length - 20} more`);
-          }
-
-          return lines.join('\n');
-        } finally {
-          cg.destroy();
-        }
-      }
-      case 'cssgraph_details': {
-        const selector = args['selector'] as string || '';
-        const { default: CodeGraph } = await import('../index');
-        const root = CodeGraph.isInitialized(cwd) ? cwd : (await this.findRoot(cwd));
-        if (!root) return 'cssgraph is not initialized.';
-        const cg = await CodeGraph.open(root);
-        try {
-          const matches = cg.selectorDetails(selector);
-          if (matches.length === 0) return `No exact match for "${selector}".`;
-          return matches.map(m =>
-            `${m.node.selector ?? m.node.name} — ${m.node.filePath}:${m.node.startLine}` +
-            (m.properties?.length ? ` (${m.properties.map(p => `${p.property}: ${p.value}`).join('; ')})` : '')
-          ).join('\n');
-        } finally {
-          cg.destroy();
-        }
-      }
-      case 'cssgraph_impact_selector': {
-        const selector = args['selector'] as string || '';
-        const { default: CodeGraph } = await import('../index');
-        const root = CodeGraph.isInitialized(cwd) ? cwd : (await this.findRoot(cwd));
-        if (!root) return 'cssgraph is not initialized.';
-        const cg = await CodeGraph.open(root);
-        try {
-          const impact = cg.selectorImpact(selector);
-          const lines: string[] = [`Selector: ${impact.selector}\n`];
-
-          if (impact.definition.length > 0) {
-            lines.push('Definition:');
-            for (const d of impact.definition) {
-              lines.push(`  ${d.filePath}:${d.line}  ${d.selector}`);
-            }
-            lines.push('');
-          }
-
-          if (impact.strict.length > 0) {
-            lines.push(`Strict impact (all classes): ${impact.strict.length} file(s)`);
-            for (const f of impact.strict.slice(0, 20)) lines.push(`  ${f}`);
-            if (impact.strict.length > 20) lines.push(`  ... and ${impact.strict.length - 20} more`);
-          }
-
-          if (impact.loose.length > impact.strict.length) {
-            lines.push(`\nLoose impact (any class): ${impact.loose.length} file(s)`);
-            for (const f of impact.loose.slice(0, 20)) lines.push(`  ${f}`);
-            if (impact.loose.length > 20) lines.push(`  ... and ${impact.loose.length - 20} more`);
-          }
-
-          return lines.join('\n');
-        } finally {
-          cg.destroy();
-        }
-      }
-      default:
-        return `Unknown tool: ${name}`;
+      case 'cssgraph_explore':          return this.handler.explore(args);
+      case 'cssgraph_search':           return this.handler.search(args);
+      case 'cssgraph_callers':          return this.handler.callers(args);
+      case 'cssgraph_impact':           return this.handler.impact(args);
+      case 'cssgraph_rule':             return this.handler.rule(args);
+      case 'cssgraph_details':          return this.handler.details(args);
+      case 'cssgraph_impact_selector':  return this.handler.impactSelector(args);
+      case 'cssgraph_files':            return this.handler.files(args);
+      case 'cssgraph_status':           return this.handler.status(args);
+      case 'cssgraph_unused':           return this.handler.unused(args);
+      case 'cssgraph_cascade':          return this.handler.cascade(args);
+      case 'cssgraph_property':         return this.handler.property(args);
+      default:                          return `Unknown tool: ${name}`;
     }
-  }
-
-  private async findRoot(cwd: string): Promise<string | null> {
-    const { findNearestCodeGraphRoot } = await import('../directory');
-    return findNearestCodeGraphRoot(cwd);
   }
 
   private send(message: Record<string, unknown>): void {
     process.stdout.write(JSON.stringify(message) + '\n');
-  }
-
-  private getInstructions(): string {
-    return SERVER_INSTRUCTIONS;
-  }
-
-  private getToolDefinitions() {
-    return [
-      {
-        name: 'cssgraph_explore',
-        description: 'PRIMARY TOOL: Get the full style context for a className — properties, overrides, specificity, and callers in one call.',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            query: { type: 'string', description: 'Class name or natural language query' },
-            maxFiles: { type: 'number', description: 'Maximum files to include (default: 12)' },
-          },
-          required: ['query'],
-        },
-      },
-      {
-        name: 'cssgraph_search',
-        description: 'Search for className selectors by name.',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            query: { type: 'string', description: 'Class name to search for' },
-          },
-          required: ['query'],
-        },
-      },
-      {
-        name: 'cssgraph_callers',
-        description: 'Find JSX components that reference a className.',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            className: { type: 'string', description: 'Class name' },
-          },
-          required: ['className'],
-        },
-      },
-      {
-        name: 'cssgraph_impact',
-        description: 'Analyze the impact radius of changing a className.',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            className: { type: 'string', description: 'Class name' },
-          },
-          required: ['className'],
-        },
-      },
-      {
-        name: 'cssgraph_rule',
-        description: 'Analyze the impact radius of a CSS selector (exact, related selectors, class usage, loose/strict impact).',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            selector: { type: 'string', description: 'Full CSS selector to analyze' },
-          },
-          required: ['selector'],
-        },
-      },
-      {
-        name: 'cssgraph_details',
-        description: 'Quick exact match: find files defining a specific CSS selector string.',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            selector: { type: 'string', description: 'Full CSS selector string (exact match)' },
-          },
-          required: ['selector'],
-        },
-      },
-      {
-        name: 'cssgraph_impact_selector',
-        description: 'Find code files (JS/TS/JSX/TSX/es6) affected by a CSS selector — strict (all classes) and loose (any class) impact.',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            selector: { type: 'string', description: 'Full CSS selector to analyze' },
-          },
-          required: ['selector'],
-        },
-      },
-      {
-        name: 'cssgraph_files',
-        description: 'List project style files from the index.',
-        inputSchema: {
-          type: 'object',
-          properties: {},
-        },
-      },
-      {
-        name: 'cssgraph_status',
-        description: 'Show index statistics.',
-        inputSchema: {
-          type: 'object',
-          properties: {},
-        },
-      },
-      {
-        name: 'cssgraph_unused',
-        description: 'Find CSS class selectors that have no incoming references.',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            limit: { type: 'number', description: 'Maximum results (default: 50, max: 200)' },
-          },
-        },
-      },
-      {
-        name: 'cssgraph_cascade',
-        description: 'Visualize the cascade path for a className, ordered by specificity.',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            className: { type: 'string', description: 'Class name to analyze' },
-          },
-          required: ['className'],
-        },
-      },
-      {
-        name: 'cssgraph_property',
-        description: 'Search selectors by CSS property value (e.g. property="display", value="flex").',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            property: { type: 'string', description: 'CSS property name (optional)' },
-            value: { type: 'string', description: 'Property value to search for' },
-            exact: { type: 'boolean', description: 'Exact value match' },
-            limit: { type: 'number', description: 'Maximum results (default: 50, max: 200)' },
-          },
-          required: ['value'],
-        },
-      },
-    ];
   }
 }

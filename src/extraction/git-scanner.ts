@@ -32,6 +32,7 @@ export function getGitVisibleFiles(rootDir: string): string[] | null {
       '--exclude-standard',
     ], {
       cwd: rootDir,
+      stdio: ['pipe', 'pipe', 'pipe'],
       maxBuffer: 200 * 1024 * 1024, // 200 MB — enough for ~2M file paths
       encoding: 'buffer',
     });

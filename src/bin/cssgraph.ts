@@ -971,10 +971,17 @@ program
 program
   .command('uninstall')
   .description('Remove cssgraph from your AI agents')
-  .action(async () => {
+  .option('--target <ids>', 'Agent targets (auto, all, or csv: claude,opencode)')
+  .option('--location <loc>', 'Config location (global, local)', 'global')
+  .option('--yes', 'Skip prompts')
+  .action(async (options: { target?: string; location?: string; yes?: boolean }) => {
     try {
       const { runUninstaller } = await import('../installer');
-      await runUninstaller();
+      await runUninstaller({
+        target: options.target,
+        location: options.location as 'global' | 'local',
+        yes: options.yes,
+      });
     } catch (err) {
       console.error(`Uninstall failed: ${err instanceof Error ? err.message : String(err)}`);
       process.exit(1);

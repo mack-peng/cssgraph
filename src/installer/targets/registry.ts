@@ -1,10 +1,31 @@
+/**
+ * Registry of all known agent targets.
+ *
+ * Adding a new target = create `targets/<id>.ts` exporting an
+ * `AgentTarget`, then add it to the array below. Order here is the
+ * order they appear in the multiselect prompt, in `--target=all`,
+ * and in `--print-config`'s help listing — keep it stable.
+ */
+
 import { AgentTarget, Location, TargetId } from './types';
 import { claudeTarget } from './claude';
+import { cursorTarget } from './cursor';
+import { codexTarget } from './codex';
 import { opencodeTarget } from './opencode';
+import { hermesTarget } from './hermes';
+import { geminiTarget } from './gemini';
+import { antigravityTarget } from './antigravity';
+import { kiroTarget } from './kiro';
 
 export const ALL_TARGETS: readonly AgentTarget[] = Object.freeze([
   claudeTarget,
+  cursorTarget,
+  codexTarget,
   opencodeTarget,
+  hermesTarget,
+  geminiTarget,
+  antigravityTarget,
+  kiroTarget,
 ]);
 
 export function getTarget(id: string): AgentTarget | undefined {
@@ -15,6 +36,12 @@ export function listTargetIds(): TargetId[] {
   return ALL_TARGETS.map((t) => t.id);
 }
 
+/**
+ * Run `detect()` for every target at the given location. Returns the
+ * full registry zipped with detection results — orchestrator uses
+ * this to seed the multiselect prompt with installed agents
+ * pre-checked.
+ */
 export function detectAll(loc: Location): Array<{
   target: AgentTarget;
   detection: ReturnType<AgentTarget['detect']>;
@@ -25,6 +52,16 @@ export function detectAll(loc: Location): Array<{
   }));
 }
 
+/**
+ * Resolve a `--target=` flag value to a list of `AgentTarget`
+ * instances. Accepts:
+ *
+ *   - `auto` — return all targets whose `detect().installed` is true,
+ *     or `['claude']` as a fallback if none detected.
+ *   - `all` — every target in the registry.
+ *   - `none` — empty list (caller skips agent writes entirely).
+ *   - csv list — `'claude,cursor'` etc. Unknown ids throw.
+ */
 export function resolveTargetFlag(value: string, loc: Location): AgentTarget[] {
   if (value === 'none') return [];
   if (value === 'all') return [...ALL_TARGETS];
