@@ -71,7 +71,8 @@ Requires Node.js >= 22.5.0 (for `node:sqlite`).
 cssgraph install
 ```
 
-Auto-detects opencode, Claude Code, Cursor, Codex CLI, Gemini CLI, and Kiro.
+Auto-detects and configures opencode, Claude Code, Cursor, Codex CLI, Gemini CLI,
+Hermes Agent, Antigravity IDE, and Kiro.
 
 Or add to any MCP agent manually:
 

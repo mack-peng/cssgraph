@@ -34,15 +34,16 @@ cssgraph exposes itself as an MCP server. Add it to your agent's MCP config so t
 cssgraph install
 ```
 
-Auto-detects and configures opencode, Claude Code, Cursor, Codex CLI, Gemini CLI, and Kiro.
+Auto-detects and configures opencode, Claude Code, Cursor, Codex CLI, Gemini CLI,
+Hermes Agent, Antigravity IDE, and Kiro.
 
 ### Manual: opencode
 
-Add to `opencode.jsonc` (or `opencode.json`):
+Add to `~/.opencode/opencode.json`:
 
-```jsonc
+```json
 {
-  "mcpServers": {
+  "mcp": {
     "cssgraph": {
       "type": "local",
       "command": ["cssgraph", "serve", "--mcp"],
