@@ -436,7 +436,7 @@ program
         const { default: CodeGraph } = await import('../index');
         const cg = await CodeGraph.open(projectPath);
         const limit = parseInt(options.limit || '50', 10);
-        const results = cg.findUnusedClassSelectors().slice(0, limit);
+        const results = cg.findUnusedClassSelectors(limit);
 
         if (options.json) {
           console.log(JSON.stringify(results.map(r => ({

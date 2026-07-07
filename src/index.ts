@@ -933,8 +933,8 @@ export class CodeGraph {
     return this.traverser.getChildren(nodeId);
   }
 
-  findUnusedClassSelectors(): UnusedResult[] {
-    return this.graphQueries.findUnusedClassSelectors();
+  findUnusedClassSelectors(limit: number): UnusedResult[] {
+    return this.graphQueries.findUnusedClassSelectors(limit);
   }
 
   getCascade(className: string): CascadeResult {

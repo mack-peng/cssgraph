@@ -90,8 +90,8 @@ export class GraphQueryManager {
     });
   }
 
-  findUnusedClassSelectors(): UnusedResult[] {
-    return this.queries.getClassSelectorsWithoutReferenceEdges();
+  findUnusedClassSelectors(limit: number): UnusedResult[] {
+    return this.queries.getClassSelectorsWithoutReferenceEdges(limit);
   }
 
   getCascade(className: string): CascadeResult {

@@ -363,7 +363,7 @@ export class MCPServer {
     const cg = await CodeGraph.open(root);
     try {
       const limit = Math.min((args['limit'] as number) ?? 50, 200);
-      const results = cg.findUnusedClassSelectors().slice(0, limit);
+      const results = cg.findUnusedClassSelectors(limit);
       if (results.length === 0) return 'No unused class selectors found.';
       return results.map(r => `${r.node.name} (${r.node.filePath}:${r.node.startLine})`).join('\n');
     } finally {

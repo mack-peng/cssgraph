@@ -62,6 +62,7 @@ export class QueryBuilder {
           WHERE e.target = n.id AND e.kind = 'references'
         )
       ORDER BY n.file_path, n.start_line
+      LIMIT ?
     `);
     this.classSelectorsByNameStmt = db.prepare(`
       SELECT * FROM nodes
@@ -281,8 +282,8 @@ export class QueryBuilder {
     return result.changes;
   }
 
-  getClassSelectorsWithoutReferenceEdges(): UnusedResult[] {
-    const rows = this.classSelectorsWithoutRefsStmt.all() as Record<string, unknown>[];
+  getClassSelectorsWithoutReferenceEdges(limit: number): UnusedResult[] {
+    const rows = this.classSelectorsWithoutRefsStmt.all(limit) as Record<string, unknown>[];
     return rows.map(r => ({
       node: this.rowToNode(r),
       referencedBy: 0,
