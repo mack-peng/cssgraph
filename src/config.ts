@@ -12,6 +12,8 @@ const DEFAULT_EXCLUDE = [
   '**/*.spec.*',
   '**/__tests__/**',
   '**/generated/**',
+  '**/spec/**',
+  '**/*.min.*',
 ];
 
 /** Frozen empty config — the zero-config path allocates nothing. */
