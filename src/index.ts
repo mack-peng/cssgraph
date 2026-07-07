@@ -408,10 +408,9 @@ export class CodeGraph {
         const fullPath = path.join(this.projectRoot, fp);
         try {
           const content = await fsp.readFile(fullPath, 'utf-8');
-          const s = await fsp.stat(fullPath);
-          return { filePath: fp, source: content, stat: s, error: null as Error | null };
+          return { filePath: fp, source: content, error: null as Error | null };
         } catch (err) {
-          return { filePath: fp, source: null as string | null, stat: null as import('fs').Stats | null, error: err as Error };
+          return { filePath: fp, source: null as string | null, error: err as Error };
         }
       }));
 
@@ -419,7 +418,7 @@ export class CodeGraph {
       const toProcess: Array<{filePath: string; source: string; isJsx: boolean; isView: boolean}> = [];
       const contentHashMap = new Map<string, string>();
 
-      for (const { filePath, source, stat, error } of fileContents) {
+      for (const { filePath, source, error } of fileContents) {
         if (options.signal?.aborted) break;
 
         if (options.onProgress) {
@@ -433,7 +432,7 @@ export class CodeGraph {
           continue;
         }
 
-        if (stat && stat.size > MAX_FILE_SIZE) {
+        if (source.length > MAX_FILE_SIZE) {
           filesSkipped++;
           globalIdx++;
           continue;

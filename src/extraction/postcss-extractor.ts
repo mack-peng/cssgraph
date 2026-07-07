@@ -5,6 +5,9 @@ import { buildFullSelector, SelectorContext } from './selector-builder';
 import { calculateSpecificity } from './specificity';
 import * as crypto from 'crypto';
 import path from 'path';
+import parser from 'postcss-selector-parser';
+
+const selectorParser = parser();
 
 function hashId(qualifiedName: string): string {
   return crypto.createHash('sha256').update(qualifiedName).digest('hex').slice(0, 16);
@@ -12,17 +15,12 @@ function hashId(qualifiedName: string): string {
 
 function walkClasses(selector: string, cb: (className: string) => void): void {
   try {
-    const parserModule = require('postcss-selector-parser') as
-      (handler: (selectors: { walk: (cb: (node: { type: string; value: string }) => void) => void }) => void) =>
-      { processSync: (s: string) => void };
-
-    parserModule((selectors) => {
-      selectors.walk((node) => {
-        if (node.type === 'class') {
-          cb(node.value);
-        }
-      });
-    }).processSync(selector);
+    const root = selectorParser.astSync(selector);
+    root.walk((node) => {
+      if (node.type === 'class') {
+        cb(node.value);
+      }
+    });
   } catch {
     const matches = selector.match(/\.([a-zA-Z_][\w-]*)/g);
     if (matches) {
@@ -35,17 +33,12 @@ function walkClasses(selector: string, cb: (className: string) => void): void {
 
 function walkIds(selector: string, cb: (id: string) => void): void {
   try {
-    const parserModule = require('postcss-selector-parser') as
-      (handler: (selectors: { walk: (cb: (node: { type: string; value: string }) => void) => void }) => void) =>
-      { processSync: (s: string) => void };
-
-    parserModule((selectors) => {
-      selectors.walk((node) => {
-        if (node.type === 'id') {
-          cb(node.value);
-        }
-      });
-    }).processSync(selector);
+    const root = selectorParser.astSync(selector);
+    root.walk((node) => {
+      if (node.type === 'id') {
+        cb(node.value);
+      }
+    });
   } catch {
     const matches = selector.match(/#([a-zA-Z_][\w-]*)/g);
     if (matches) {

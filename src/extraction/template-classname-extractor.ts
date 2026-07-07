@@ -4,6 +4,24 @@ export interface ClassNameReference {
   line: number;
 }
 
+function buildLineOffsets(source: string): number[] {
+  const offsets = [0];
+  for (let i = 0; i < source.length; i++) {
+    if (source[i] === '\n') offsets.push(i + 1);
+  }
+  return offsets;
+}
+
+function offsetToLine(offsets: number[], offset: number): number {
+  let lo = 0, hi = offsets.length - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >>> 1;
+    if (offsets[mid]! <= offset) lo = mid + 1;
+    else hi = mid - 1;
+  }
+  return hi + 1;
+}
+
 export function extractTemplateClassNameUsage(
   source: string,
   filePath: string,
@@ -11,6 +29,7 @@ export function extractTemplateClassNameUsage(
   const results: ClassNameReference[] = [];
   const seen = new Set<string>();
   const ext = filePath.split('.').pop()?.toLowerCase();
+  const lineOffsets = buildLineOffsets(source);
 
   const add = (className: string, line: number) => {
     const key = `${className}:${line}`;
@@ -30,7 +49,7 @@ export function extractTemplateClassNameUsage(
   const attrPattern = /\bclass\s*=\s*"([^"]*)"|class\s*=\s*'([^']*)'/g;
   let match: RegExpExecArray | null;
   while ((match = attrPattern.exec(source)) !== null) {
-    const line = source.slice(0, match.index).split('\n').length;
+    const line = offsetToLine(lineOffsets, match.index);
     const value = match[1] ?? match[2]!;
     addAll(value, line);
   }
@@ -53,7 +72,7 @@ export function extractTemplateClassNameUsage(
   if (ext === 'haml') {
     const hashPattern = /[{,]\s*(?::)?class\s*(?:=>|:)\s*["']([^"']*)["']/g;
     while ((match = hashPattern.exec(source)) !== null) {
-      const line = source.slice(0, match.index).split('\n').length;
+      const line = offsetToLine(lineOffsets, match.index);
       addAll(match[1]!, line);
     }
   }

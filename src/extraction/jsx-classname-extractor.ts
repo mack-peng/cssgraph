@@ -4,9 +4,28 @@ export interface ClassNameReference {
   line: number;
 }
 
+function buildLineOffsets(source: string): number[] {
+  const offsets = [0];
+  for (let i = 0; i < source.length; i++) {
+    if (source[i] === '\n') offsets.push(i + 1);
+  }
+  return offsets;
+}
+
+function offsetToLine(offsets: number[], offset: number): number {
+  let lo = 0, hi = offsets.length - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >>> 1;
+    if (offsets[mid]! <= offset) lo = mid + 1;
+    else hi = mid - 1;
+  }
+  return hi + 1;
+}
+
 export function extractClassNameUsage(jsxSource: string, filePath: string): ClassNameReference[] {
   const results: ClassNameReference[] = [];
   const seen = new Set<string>();
+  const lineOffsets = buildLineOffsets(jsxSource);
 
   const add = (className: string, line: number) => {
     const key = `${className}:${line}`;
@@ -21,7 +40,7 @@ export function extractClassNameUsage(jsxSource: string, filePath: string): Clas
 
   let match: RegExpExecArray | null;
   while ((match = pattern.exec(jsxSource)) !== null) {
-    const line = indexToLine(jsxSource, match.index);
+    const line = offsetToLine(lineOffsets, match.index);
 
     if (match[1]) {
       for (const cls of splitClassNames(match[1])) add(cls, line);
@@ -121,6 +140,4 @@ function extractClassNamesFromExpression(
   }
 }
 
-function indexToLine(source: string, index: number): number {
-  return source.slice(0, index).split('\n').length;
-}
+
