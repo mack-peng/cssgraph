@@ -47,7 +47,7 @@ interface IdleWorker {
 
 export class ParseWorkerPool {
   private scriptPath: string;
-  private size: number;
+  readonly size: number;
   private idle: IdleWorker[] = [];
   private pending = new Map<number, PendingJob>();
   private queue: PendingJob[] = [];

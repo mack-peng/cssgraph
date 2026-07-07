@@ -318,49 +318,6 @@ export class CodeGraph {
         source.indexOf('styled') !== -1;
     };
 
-    // Parallel dispatch: runs all parses across workers in one Promise.all.
-    type ParseBatchItem = {
-      filePath: string; source: string; isJsx: boolean; isView: boolean;
-    };
-    type ParseBatchResult = ParseBatchItem & {
-      result: import('./types').ExtractionResult;
-      jsxRefs?: Array<{ className: string; filePath: string; line: number }>;
-      refs?: Array<{ className: string; filePath: string; line: number }>;
-    };
-    const dispatchParseBatch = async (
-      items: ParseBatchItem[],
-      pool_: ParseWorkerPool | null,
-    ): Promise<ParseBatchResult[]> => {
-      return Promise.all(items.map(async (item): Promise<ParseBatchResult> => {
-        let result: import('./types').ExtractionResult;
-        let jsxRefs: ParseBatchResult['jsxRefs'];
-        let refs: ParseBatchResult['refs'];
-
-        if (item.isView) {
-          result = { nodes: [], edges: [], errors: [], durationMs: 0 };
-          refs = extractTemplateClassNameUsage(item.source, item.filePath);
-        } else if (item.isJsx) {
-          if (pool_) {
-            const pr = await pool_.requestParse({ type: 'jsx', filePath: item.filePath, content: item.source });
-            result = pr.result;
-            jsxRefs = pr.jsxRefs;
-          } else {
-            result = extractCSSInJS(item.filePath, item.source);
-            refs = hasJSXMarkers(item.source) ? extractClassNameUsage(item.source, item.filePath) : undefined;
-          }
-        } else {
-          if (pool_) {
-            const pr = await pool_.requestParse({ type: 'style', filePath: item.filePath, content: item.source });
-            result = pr.result;
-          } else {
-            result = extractFromSource(item.filePath, item.source);
-          }
-        }
-
-        return { ...item, result, jsxRefs, refs };
-      }));
-    };
-
     const SAVEPOINT_BATCH_SIZE = 100;
     const FILE_IO_BATCH_SIZE = 10;
     const MAX_FILE_SIZE = 1_000_000; // 1 MB
@@ -383,6 +340,11 @@ export class CodeGraph {
     // Disable FTS5 triggers during bulk load — rebuilt from scratch after indexing.
     this.db.getDb().exec('DROP TRIGGER IF EXISTS nodes_ai; DROP TRIGGER IF EXISTS nodes_ad; DROP TRIGGER IF EXISTS nodes_au;');
 
+    // Drop edge identity index for bulk speed — plain INSERT skips B-tree dedup probe.
+    // Recreated (with dedup fallback) after all data is committed.
+    this.db.getDb().exec('DROP INDEX IF EXISTS idx_edges_identity;');
+    this.queries.setBulkMode(true);
+
     // Incremental mode: delete old nodes before re-indexing changed files.
     // Edges cascade-delete via FK on nodes.id.
     if (fileFilter) {
@@ -395,13 +357,173 @@ export class CodeGraph {
       }
     }
 
-    let fileCountInBatch = 0;
+    // ─── Rolling-window pipeline (borrows from codegraph's pattern) ───
+    // Continuously dispatch files to workers; commit results in file order.
+    // Workers stay busy while DB writes happen — no batch-synchronous stalls.
+    // CRITICAL: ref resolution happens in flushOne (in order), NOT in feed
+    // (concurrent), so classSelectorMap is complete when JSX/view refs are matched.
     let globalIdx = 0;
+    let fileCountInBatch = 0;
     let nextSeq = 0;
-    const storeCursor = { current: 0 };
-    interface StoreItem { filePath: string; source: string; contentHash: string; result: import('./types').ExtractionResult; }
-    const completed = new Map<number, StoreItem>();
+    let nextToStore = 0;
+    interface PendingItem {
+      filePath: string; source: string; contentHash: string;
+      isJsx: boolean; isView: boolean;
+      result: import('./types').ExtractionResult;
+      jsxRefs?: Array<{ className: string; filePath: string; line: number }>;
+      refs?: Array<{ className: string; filePath: string; line: number }>;
+    }
+    const completed = new Map<number, PendingItem>();
+    const inFlight = new Set<Promise<void>>();
+    const windowSize = pool ? Math.max(4, pool.size * 2) : 1;
 
+    // Flush a completed result to DB (called in seq order, after classSelectorMap is updated).
+    const flushOne = (item: PendingItem) => {
+      const { filePath, source, result, jsxRefs, refs, isJsx, isView } = item;
+
+      // Resolve JSX refs / CSS modules / view refs against classSelectorMap (NOW in order).
+      if (isJsx) {
+        const fileNodeId = result.nodes.find(n => n.kind === 'file')?.id;
+        const edgeRefs = jsxRefs ?? refs;
+        if (edgeRefs && fileNodeId) {
+          for (const ref of edgeRefs) {
+            const targetIds = classSelectorMap.get(ref.className);
+            if (!targetIds || targetIds.length === 0) continue;
+            for (const targetId of targetIds) {
+              result.edges.push({ source: fileNodeId, target: targetId, kind: 'references', provenance: 'heuristic', line: ref.line });
+            }
+          }
+        }
+        if (fileNodeId) {
+          const cssModuleImports = findCSSModuleImports(source);
+          for (const imp of cssModuleImports) {
+            const cssModulePath = resolveCSSModulePath(this.projectRoot, path.join(this.projectRoot, filePath), imp.importPath);
+            const cssFileNodeId = require('crypto').createHash('sha256').update(`file:${cssModulePath}`).digest('hex').slice(0, 16);
+            result.edges.push({ source: fileNodeId, target: cssFileNodeId, kind: 'imports', provenance: 'heuristic', line: imp.line });
+            if (imp.bindingName) {
+              let moduleClassMap = moduleClassMapCache.get(cssModulePath);
+              if (!moduleClassMap) {
+                moduleClassMap = new Map<string, string[]>();
+                const moduleSelectors = this.queries.getNodesByFile(cssModulePath).filter(n => n.kind === 'class_selector');
+                for (const node of moduleSelectors) {
+                  const list = moduleClassMap.get(node.name) || [];
+                  list.push(node.id);
+                  moduleClassMap.set(node.name, list);
+                }
+                moduleClassMapCache.set(cssModulePath, moduleClassMap);
+              }
+              const usages = extractCSSModuleUsage(source, imp.bindingName);
+              for (const usage of usages) {
+                const targetIds = moduleClassMap.get(usage.className);
+                if (!targetIds || targetIds.length === 0) continue;
+                for (const targetId of targetIds) {
+                  result.edges.push({ source: fileNodeId, target: targetId, kind: 'references', provenance: 'heuristic', line: usage.line });
+                }
+              }
+            }
+          }
+        }
+      } else if (isView) {
+        const viewFileId = result.nodes.find(n => n.kind === 'file')?.id ||
+          require('crypto').createHash('sha256').update(`file:${filePath}`).digest('hex').slice(0, 16);
+        if (!result.nodes.some(n => n.id === viewFileId)) {
+          result.nodes.push({ id: viewFileId, name: filePath, qualifiedName: filePath, kind: 'file', filePath, language: detectLanguage(filePath), startLine: 0, endLine: 0, startColumn: 0, endColumn: 0, updatedAt: Date.now() });
+        }
+        if (refs) {
+          for (const ref of refs) {
+            const targetIds = classSelectorMap.get(ref.className);
+            if (!targetIds || targetIds.length === 0) continue;
+            for (const targetId of targetIds) {
+              result.edges.push({ source: viewFileId, target: targetId, kind: 'references', provenance: 'heuristic', line: ref.line });
+            }
+          }
+        }
+      }
+
+      // Write to DB.
+      this.queries.insertNodesBatch(result.nodes);
+      totalNodes += result.nodes.length;
+      for (const node of result.nodes) {
+        if (node.kind === 'class_selector' && !node.name.startsWith('#')) {
+          const list = classSelectorMap.get(node.name) || [];
+          list.push(node.id);
+          classSelectorMap.set(node.name, list);
+        }
+      }
+      this.queries.insertEdgesBatch(result.edges);
+      totalEdges += result.edges.length;
+      this.queries.insertFile({
+        path: filePath, contentHash: item.contentHash,
+        language: detectLanguage(filePath), size: source.length,
+        modifiedAt: Date.now(), indexedAt: Date.now(),
+        nodeCount: result.nodes.length,
+        errors: result.errors.length > 0 ? result.errors : undefined,
+      });
+      filesIndexed++;
+      if (result.errors.length > 0) allErrors.push(...result.errors);
+      globalIdx++;
+      fileCountInBatch++;
+      if (fileCountInBatch >= SAVEPOINT_BATCH_SIZE) {
+        this.db.getDb().exec('COMMIT');
+        this.db.getDb().exec('BEGIN');
+        fileCountInBatch = 0;
+      }
+    };
+
+    // Drain completed results in seq order.
+    const drainOrdered = (): void => {
+      while (completed.has(nextToStore)) {
+        const item = completed.get(nextToStore)!;
+        completed.delete(nextToStore);
+        nextToStore++;
+        flushOne(item);
+      }
+    };
+
+    // Feed one file into the pipeline: parse it (worker or inline), buffer result.
+    // Ref resolution is deferred to flushOne — NOT done here.
+    const feed = async (filePath: string, source: string, contentHash: string, isJsx: boolean, isView: boolean): Promise<void> => {
+      const seq = nextSeq++;
+      try {
+        let result: import('./types').ExtractionResult;
+        let jsxRefs: Array<{ className: string; filePath: string; line: number }> | undefined;
+        let refs: Array<{ className: string; filePath: string; line: number }> | undefined;
+
+        if (isView) {
+          result = { nodes: [], edges: [], errors: [], durationMs: 0 };
+          refs = extractTemplateClassNameUsage(source, filePath);
+        } else if (isJsx) {
+          if (pool) {
+            const pr = await pool.requestParse({ type: 'jsx', filePath, content: source });
+            result = pr.result;
+            jsxRefs = pr.jsxRefs;
+          } else {
+            result = extractCSSInJS(filePath, source);
+            refs = hasJSXMarkers(source) ? extractClassNameUsage(source, filePath) : undefined;
+          }
+        } else {
+          if (pool) {
+            const pr = await pool.requestParse({ type: 'style', filePath, content: source });
+            result = pr.result;
+          } else {
+            result = extractFromSource(filePath, source);
+          }
+        }
+
+        completed.set(seq, { filePath, source, contentHash, isJsx, isView, result, jsxRefs, refs });
+      } catch (err) {
+        filesErrored++;
+        globalIdx++;
+        allErrors.push({
+          message: err instanceof Error ? err.message : String(err),
+          filePath, severity: 'error', code: 'parse_error',
+        });
+        completed.set(seq, { filePath, source, contentHash, isJsx, isView, result: { nodes: [], edges: [], errors: [], durationMs: 0 } });
+      }
+      drainOrdered();
+    };
+
+    // Main loop: read files in batches, feed each into the rolling window.
     for (let bi = 0; bi < orderedFiles.length; bi += FILE_IO_BATCH_SIZE) {
       if (options.signal?.aborted) break;
 
@@ -415,10 +537,6 @@ export class CodeGraph {
           return { filePath: fp, source: null as string | null, error: err as Error };
         }
       }));
-
-      // ═══ Phase 1: Collect — error checks, content-hash skip, gather files ═══
-      const toProcess: Array<{filePath: string; source: string; isJsx: boolean; isView: boolean}> = [];
-      const contentHashMap = new Map<string, string>();
 
       for (const { filePath, source, error } of fileContents) {
         if (options.signal?.aborted) break;
@@ -442,185 +560,57 @@ export class CodeGraph {
 
         try {
           const contentHash = require('crypto').createHash('sha256').update(source).digest('hex');
+          const isJsx = isJSXFile(filePath);
+          const isView = isViewFile(filePath);
+          const skipHash = isJsx || isView;
+          const existingFile = skipHash ? null : this.queries.getFileByPath(filePath);
 
-        const isJsx = isJSXFile(filePath);
-        const isView = isViewFile(filePath);
-        const skipHash = isJsx || isView;
-        const existingFile = skipHash ? null : this.queries.getFileByPath(filePath);
-        if (existingFile && existingFile.contentHash === contentHash) {
-          if (!isJsx) {
-            const classNodes = this.queries.getNodesByFile(filePath, ['class_selector'] as import('./types').NodeKind[]);
-            for (const node of classNodes) {
-              if (node.name.startsWith('#')) continue;
-              const list = classSelectorMap.get(node.name) || [];
-              list.push(node.id);
-              classSelectorMap.set(node.name, list);
+          if (existingFile && existingFile.contentHash === contentHash) {
+            if (!isJsx) {
+              const classNodes = this.queries.getNodesByFile(filePath, ['class_selector'] as import('./types').NodeKind[]);
+              for (const node of classNodes) {
+                if (node.name.startsWith('#')) continue;
+                const list = classSelectorMap.get(node.name) || [];
+                list.push(node.id);
+                classSelectorMap.set(node.name, list);
+              }
             }
+            fileCountInBatch++;
+            if (fileCountInBatch >= SAVEPOINT_BATCH_SIZE) {
+              this.db.getDb().exec('COMMIT');
+              this.db.getDb().exec('BEGIN');
+              fileCountInBatch = 0;
+            }
+            filesSkipped++;
+            globalIdx++;
+            continue;
           }
-          fileCountInBatch++;
-          if (fileCountInBatch >= SAVEPOINT_BATCH_SIZE) {
-            this.db.getDb().exec('COMMIT');
-            this.db.getDb().exec('BEGIN');
-            fileCountInBatch = 0;
-          }
-          filesSkipped++;
-          globalIdx++;
-          continue;
-        }
 
-        toProcess.push({ filePath, source, isJsx, isView });
-        contentHashMap.set(filePath, contentHash);
+          // Dispatch into rolling window.
+          const p = feed(filePath, source, contentHash, isJsx, isView);
+          inFlight.add(p);
+          p.then(() => { inFlight.delete(p); });
+
+          // Backpressure: wait if buffered results exceed window size.
+          while (nextSeq - nextToStore >= windowSize && inFlight.size > 0) {
+            await Promise.race(inFlight);
+          }
         } catch (err) {
           filesErrored++;
           globalIdx++;
           allErrors.push({
             message: err instanceof Error ? err.message : String(err),
-            filePath,
-            severity: 'error',
-            code: 'parse_error',
+            filePath, severity: 'error', code: 'parse_error',
           });
         }
       }
-
-      // ═══ Phase 2+3: Parallel parse dispatch → sequential ref resolution + flush ═══
-      if (toProcess.length > 0) {
-        const parsed = await dispatchParseBatch(toProcess, pool);
-
-        for (const req of parsed) {
-          if (options.signal?.aborted) break;
-
-          const { filePath, source, isJsx, isView, result, jsxRefs, refs } = req;
-          const contentHash = contentHashMap.get(filePath)!;
-          let fileNodeId: string | undefined;
-
-          try {
-            if (isJsx) {
-              fileNodeId = result.nodes.find(n => n.kind === 'file')?.id;
-              const edgeRefs = jsxRefs ?? refs;
-              if (edgeRefs && fileNodeId) {
-                for (const ref of edgeRefs) {
-                  const targetIds = classSelectorMap.get(ref.className);
-                  if (!targetIds || targetIds.length === 0) continue;
-                  for (const targetId of targetIds) {
-                    result.edges.push({ source: fileNodeId, target: targetId, kind: 'references', provenance: 'heuristic', line: ref.line });
-                  }
-                }
-              }
-
-              if (fileNodeId) {
-                const cssModuleImports = findCSSModuleImports(source);
-                for (const imp of cssModuleImports) {
-                  const cssModulePath = resolveCSSModulePath(this.projectRoot, path.join(this.projectRoot, filePath), imp.importPath);
-                  const cssFileNodeId = require('crypto').createHash('sha256').update(`file:${cssModulePath}`).digest('hex').slice(0, 16);
-                  result.edges.push({
-                    source: fileNodeId, target: cssFileNodeId,
-                    kind: 'imports', provenance: 'heuristic', line: imp.line,
-                  });
-
-                  if (imp.bindingName) {
-                    let moduleClassMap = moduleClassMapCache.get(cssModulePath);
-                    if (!moduleClassMap) {
-                      moduleClassMap = new Map<string, string[]>();
-                      const moduleSelectors = this.queries.getNodesByFile(cssModulePath)
-                        .filter(n => n.kind === 'class_selector');
-                      for (const node of moduleSelectors) {
-                        const list = moduleClassMap.get(node.name) || [];
-                        list.push(node.id);
-                        moduleClassMap.set(node.name, list);
-                      }
-                      moduleClassMapCache.set(cssModulePath, moduleClassMap);
-                    }
-                    const usages = extractCSSModuleUsage(source, imp.bindingName);
-                    for (const usage of usages) {
-                      const targetIds = moduleClassMap.get(usage.className);
-                      if (!targetIds || targetIds.length === 0) continue;
-                      for (const targetId of targetIds) {
-                        result.edges.push({
-                          source: fileNodeId, target: targetId,
-                          kind: 'references', provenance: 'heuristic', line: usage.line,
-                        });
-                      }
-                    }
-                  }
-                }
-              }
-            } else if (isView) {
-              const viewFileId = result.nodes.find(n => n.kind === 'file')?.id ||
-                require('crypto').createHash('sha256').update(`file:${filePath}`).digest('hex').slice(0, 16);
-              if (!result.nodes.some(n => n.id === viewFileId)) {
-                result.nodes.push({ id: viewFileId, name: filePath, qualifiedName: filePath, kind: 'file', filePath, language: detectLanguage(filePath), startLine: 0, endLine: 0, startColumn: 0, endColumn: 0, updatedAt: Date.now() });
-              }
-              fileNodeId = viewFileId;
-              if (refs) {
-                for (const ref of refs) {
-                  const targetIds = classSelectorMap.get(ref.className);
-                  if (!targetIds || targetIds.length === 0) continue;
-                  for (const targetId of targetIds) {
-                    result.edges.push({ source: viewFileId, target: targetId, kind: 'references', provenance: 'heuristic', line: ref.line });
-                  }
-                }
-              }
-            } else {
-              fileNodeId = result.nodes.find(n => n.kind === 'file')?.id;
-            }
-
-            if (result.errors.length > 0 && result.nodes.length === 0) {
-              filesErrored++;
-              allErrors.push(...result.errors);
-              globalIdx++;
-              continue;
-            }
-
-            const seq = nextSeq++;
-            completed.set(seq, { filePath, source, contentHash, result });
-            CodeGraph.flushOrdered(completed, storeCursor, (item) => {
-              this.db.getDb().exec('SAVEPOINT sp');
-
-              this.queries.insertNodesBatch(item.result.nodes);
-              totalNodes += item.result.nodes.length;
-              for (const node of item.result.nodes) {
-                if (node.kind === 'class_selector' && !node.name.startsWith('#')) {
-                  const list = classSelectorMap.get(node.name) || [];
-                  list.push(node.id);
-                  classSelectorMap.set(node.name, list);
-                }
-              }
-
-              this.queries.insertEdgesBatch(item.result.edges);
-              totalEdges += item.result.edges.length;
-
-              this.queries.insertFile({
-                path: item.filePath, contentHash: item.contentHash,
-                language: detectLanguage(item.filePath), size: item.source.length,
-                modifiedAt: Date.now(), indexedAt: Date.now(),
-                nodeCount: item.result.nodes.length,
-                errors: item.result.errors.length > 0 ? item.result.errors : undefined,
-              });
-
-              this.db.getDb().exec('RELEASE sp');
-
-              filesIndexed++;
-              if (item.result.errors.length > 0) allErrors.push(...item.result.errors);
-              globalIdx++;
-
-              fileCountInBatch++;
-              if (fileCountInBatch >= SAVEPOINT_BATCH_SIZE) {
-                this.db.getDb().exec('COMMIT');
-                this.db.getDb().exec('BEGIN');
-                fileCountInBatch = 0;
-              }
-            });
-          } catch (err) {
-            filesErrored++;
-            globalIdx++;
-            allErrors.push({
-              message: err instanceof Error ? err.message : String(err),
-              filePath, severity: 'error', code: 'parse_error',
-            });
-          }
-        }
-      }
     }
+
+    // Wait for all in-flight parses to complete and drain remaining results.
+    while (inFlight.size > 0) {
+      await Promise.race(inFlight);
+    }
+    drainOrdered();
 
     if (fileCountInBatch > 0) {
       this.db.getDb().exec('COMMIT');
@@ -644,6 +634,24 @@ export class CodeGraph {
         VALUES (NEW.rowid, NEW.id, NEW.name, NEW.qualified_name, NEW.selector, NEW.value);
       END;
     `);
+
+    // Restore edge identity index. Try direct CREATE first (fast path, no dups).
+    // If it fails (duplicates exist), dedup then retry.
+    this.queries.setBulkMode(false);
+    try {
+      this.db.getDb().exec(
+        `CREATE UNIQUE INDEX IF NOT EXISTS idx_edges_identity ON edges(source, target, kind, IFNULL(line, -1), IFNULL(col, -1))`
+      );
+    } catch {
+      // Rare: duplicates from bulk INSERT without OR IGNORE. Dedup then retry.
+      this.db.getDb().exec(`
+        CREATE TEMP TABLE _dedup AS SELECT MIN(id) AS kept_id FROM edges GROUP BY source, target, kind, IFNULL(line, -1), IFNULL(col, -1);
+        CREATE INDEX _dedup_id ON _dedup(kept_id);
+        DELETE FROM edges WHERE id NOT IN (SELECT kept_id FROM _dedup);
+        DROP TABLE _dedup;
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_edges_identity ON edges(source, target, kind, IFNULL(line, -1), IFNULL(col, -1));
+      `);
+    }
 
     if (pool) await pool.shutdown();
 
@@ -959,27 +967,6 @@ export class CodeGraph {
 
   // ===========================================================================
   // Store helpers (for Worker-pool decoupling)
-  // ===========================================================================
-
-  /** Commit completed items in file-order using a sequence-number buffer.
-   *  Today parse is serial so flushOrdered always drains in one call; the
-   *  Map buffer exists so the Worker pool can deliver results out-of-order
-   *  while store stays sequential. */
-  private static flushOrdered<T>(
-    completed: Map<number, T>,
-    cursor: { current: number },
-    fn: (item: T) => void,
-  ): number {
-    let flushed = 0;
-    while (completed.has(cursor.current)) {
-      fn(completed.get(cursor.current)!);
-      completed.delete(cursor.current);
-      cursor.current++;
-      flushed++;
-    }
-    return flushed;
-  }
-
   // ===========================================================================
   // Cleanup
   // ===========================================================================

@@ -9,10 +9,12 @@ function hashId(qualifiedName: string): string {
 export class QueryBuilder {
   private db: DatabaseSync;
   private projectNameTokens: Set<string> = new Set();
+  private bulkMode = false;
   private insertNodeStmt: StatementSync;
   private insertEdgeStmt: StatementSync;
   private insertFileStmt: StatementSync;
   private insertEdgeBatch100Stmt: StatementSync;
+  private insertEdgeFastBatch100Stmt: StatementSync;
   private insertNodeBatch50Stmt: StatementSync;
   private classSelectorsWithoutRefsStmt: StatementSync;
   private classSelectorsByNameStmt: StatementSync;
@@ -38,6 +40,10 @@ export class QueryBuilder {
     const edgePh100 = Array(100).fill('(?, ?, ?, ?, ?, ?, ?)').join(', ');
     this.insertEdgeBatch100Stmt = db.prepare(
       `INSERT OR IGNORE INTO edges (source, target, kind, metadata, line, col, provenance) VALUES ${edgePh100}`
+    );
+    // Fast batch: plain INSERT (no OR IGNORE) — used when idx_edges_identity is dropped.
+    this.insertEdgeFastBatch100Stmt = db.prepare(
+      `INSERT INTO edges (source, target, kind, metadata, line, col, provenance) VALUES ${edgePh100}`
     );
     // Pre-compiled 50-row batch INSERT for nodes.
     const nodePh50 = Array(50).fill('(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').join(', ');
@@ -99,6 +105,11 @@ export class QueryBuilder {
     this.projectNameTokens = tokens;
   }
 
+  /** Enable fast bulk mode: plain INSERT (no dedup check), used when idx_edges_identity is dropped. */
+  setBulkMode(on: boolean): void {
+    this.bulkMode = on;
+  }
+
   getProjectNameTokens(): Set<string> {
     return this.projectNameTokens;
   }
@@ -144,6 +155,7 @@ export class QueryBuilder {
   insertEdgesBatch(edges: Edge[]): void {
     if (edges.length === 0) return;
     const BATCH = 100;
+    const stmt = this.bulkMode ? this.insertEdgeFastBatch100Stmt : this.insertEdgeBatch100Stmt;
     let i = 0;
     // Full 100-row batches use the pre-compiled statement (no prepare overhead).
     for (; i + BATCH <= edges.length; i += BATCH) {
@@ -160,7 +172,7 @@ export class QueryBuilder {
           edge.provenance ?? null,
         );
       }
-      this.insertEdgeBatch100Stmt.run(...params);
+      stmt.run(...params);
     }
     // Remaining < 100 rows fall back to single-row prepared statement.
     for (; i < edges.length; i++) {
