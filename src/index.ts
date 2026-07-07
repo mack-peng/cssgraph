@@ -629,18 +629,18 @@ export class CodeGraph {
     this.db.getDb().exec(`INSERT INTO nodes_fts(nodes_fts) VALUES('rebuild')`);
     this.db.getDb().exec(`
       CREATE TRIGGER IF NOT EXISTS nodes_ai AFTER INSERT ON nodes BEGIN
-        INSERT INTO nodes_fts(rowid, id, name, qualified_name, selector)
-        VALUES (NEW.rowid, NEW.id, NEW.name, NEW.qualified_name, NEW.selector);
+        INSERT INTO nodes_fts(rowid, id, name, qualified_name, selector, value)
+        VALUES (NEW.rowid, NEW.id, NEW.name, NEW.qualified_name, NEW.selector, NEW.value);
       END;
       CREATE TRIGGER IF NOT EXISTS nodes_ad AFTER DELETE ON nodes BEGIN
-        INSERT INTO nodes_fts(nodes_fts, rowid, id, name, qualified_name, selector)
-        VALUES ('delete', OLD.rowid, OLD.id, OLD.name, OLD.qualified_name, OLD.selector);
+        INSERT INTO nodes_fts(nodes_fts, rowid, id, name, qualified_name, selector, value)
+        VALUES ('delete', OLD.rowid, OLD.id, OLD.name, OLD.qualified_name, OLD.selector, OLD.value);
       END;
       CREATE TRIGGER IF NOT EXISTS nodes_au AFTER UPDATE ON nodes BEGIN
-        INSERT INTO nodes_fts(nodes_fts, rowid, id, name, qualified_name, selector)
-        VALUES ('delete', OLD.rowid, OLD.id, OLD.name, OLD.qualified_name, OLD.selector);
-        INSERT INTO nodes_fts(rowid, id, name, qualified_name, selector)
-        VALUES (NEW.rowid, NEW.id, NEW.name, NEW.qualified_name, NEW.selector);
+        INSERT INTO nodes_fts(nodes_fts, rowid, id, name, qualified_name, selector, value)
+        VALUES ('delete', OLD.rowid, OLD.id, OLD.name, OLD.qualified_name, OLD.selector, OLD.value);
+        INSERT INTO nodes_fts(rowid, id, name, qualified_name, selector, value)
+        VALUES (NEW.rowid, NEW.id, NEW.name, NEW.qualified_name, NEW.selector, NEW.value);
       END;
     `);
 

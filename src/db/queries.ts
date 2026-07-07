@@ -17,6 +17,8 @@ export class QueryBuilder {
   private classSelectorsBySelectorStmt: StatementSync;
   private propertiesByValueStmt: StatementSync;
   private propertiesByPropertyValueStmt: StatementSync;
+  private propertiesExactStmt: StatementSync;
+  private propertiesByPropExactStmt: StatementSync;
 
   constructor(db: DatabaseSync) {
     this.db = db;
@@ -55,13 +57,27 @@ export class QueryBuilder {
     `);
     this.propertiesByValueStmt = db.prepare(`
       SELECT n.* FROM nodes n
-      WHERE n.kind = 'css_property' AND n.value LIKE ?
+      JOIN nodes_fts fts ON n.rowid = fts.rowid
+      WHERE n.kind = 'css_property' AND nodes_fts MATCH ?
       ORDER BY n.file_path, n.start_line
       LIMIT ?
     `);
     this.propertiesByPropertyValueStmt = db.prepare(`
       SELECT n.* FROM nodes n
-      WHERE n.kind = 'css_property' AND lower(n.name) = lower(?) AND n.value LIKE ?
+      JOIN nodes_fts fts ON n.rowid = fts.rowid
+      WHERE n.kind = 'css_property' AND lower(n.name) = lower(?) AND nodes_fts MATCH ?
+      ORDER BY n.file_path, n.start_line
+      LIMIT ?
+    `);
+    this.propertiesExactStmt = db.prepare(`
+      SELECT n.* FROM nodes n
+      WHERE n.kind = 'css_property' AND n.value = ?
+      ORDER BY n.file_path, n.start_line
+      LIMIT ?
+    `);
+    this.propertiesByPropExactStmt = db.prepare(`
+      SELECT n.* FROM nodes n
+      WHERE n.kind = 'css_property' AND lower(n.name) = lower(?) AND n.value = ?
       ORDER BY n.file_path, n.start_line
       LIMIT ?
     `);
@@ -209,13 +225,22 @@ export class QueryBuilder {
 
   searchNodesByPropertyValue(options: PropertySearchOptions): PropertySearchResult[] {
     const limit = options.limit ?? 50;
-    const valuePattern = options.exact ? options.value : `%${options.value}%`;
 
     let rows: Record<string, unknown>[];
-    if (options.property) {
-      rows = this.propertiesByPropertyValueStmt.all(options.property, valuePattern, limit) as Record<string, unknown>[];
+    if (options.exact) {
+      if (options.property) {
+        rows = this.propertiesByPropExactStmt.all(options.property, options.value, limit) as Record<string, unknown>[];
+      } else {
+        rows = this.propertiesExactStmt.all(options.value, limit) as Record<string, unknown>[];
+      }
     } else {
-      rows = this.propertiesByValueStmt.all(valuePattern, limit) as Record<string, unknown>[];
+      // FTS5 prefix search: "8*" matches tokens "8px", "8rem", "8%", etc.
+      const ftsQuery = options.value + '*';
+      if (options.property) {
+        rows = this.propertiesByPropertyValueStmt.all(options.property, ftsQuery, limit) as Record<string, unknown>[];
+      } else {
+        rows = this.propertiesByValueStmt.all(ftsQuery, limit) as Record<string, unknown>[];
+      }
     }
 
     return rows.map(r => ({

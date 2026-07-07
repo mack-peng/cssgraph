@@ -91,12 +91,7 @@ export class GraphQueryManager {
   }
 
   findUnusedClassSelectors(): UnusedResult[] {
-    const candidates = this.queries.getClassSelectorsWithoutReferenceEdges();
-    return candidates.map(({ node }) => {
-      const incoming = this.queries.getIncomingEdges(node.id);
-      const referencesCount = incoming.filter(e => e.kind === 'references').length;
-      return { node, referencedBy: referencesCount };
-    });
+    return this.queries.getClassSelectorsWithoutReferenceEdges();
   }
 
   getCascade(className: string): CascadeResult {
