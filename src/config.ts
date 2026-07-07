@@ -11,8 +11,11 @@ const DEFAULT_EXCLUDE = [
   '**/*.stories.*',
   '**/*.spec.*',
   '**/__tests__/**',
+  '**/__snapshots__/**',
+  '**/__mocks__/**',
   '**/generated/**',
   '**/spec/**',
+  '**/vendor/**',
   '**/*.min.*',
 ];
 

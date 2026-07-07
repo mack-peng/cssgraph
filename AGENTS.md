@@ -112,8 +112,9 @@ files       → PostCSS / CSS-in-JS / JSX extractors / template extractor
 **DB bulk-load optimization**: FTS5 triggers and `idx_edges_identity` are dropped before bulk indexing. FTS5 is rebuilt in one `INSERT INTO nodes_fts ... VALUES('rebuild')` after all data is committed. The edge identity index is recreated via a fast dedup-check query (`GROUP BY ... HAVING COUNT(*) > 1 LIMIT 1`) — if no duplicates exist (the common case), `CREATE UNIQUE INDEX` runs directly. This eliminates per-row B-tree/FTS overhead during the indexing phase.
 
 **Default excludes** (built-in, not from `.gitignore`):
-- `**/*.test.*` / `**/*.stories.*` / `**/*.spec.*`
-- `**/__tests__/**` / `**/generated/**`
+- `**/*.test.*` / `**/*.stories.*` / `**/*.spec.*` / `**/*.min.*`
+- `**/__tests__/**` / `**/__snapshots__/**` / `**/__mocks__/**`
+- `**/generated/**` / `**/spec/**` / `**/vendor/**`
 
 Plus `.cssgraph.json` project-level `exclude` patterns.
 
