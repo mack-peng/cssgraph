@@ -378,8 +378,6 @@ export class CodeGraph {
 
     // Disable FTS5 triggers during bulk load — rebuilt from scratch after indexing.
     this.db.getDb().exec('DROP TRIGGER IF EXISTS nodes_ai; DROP TRIGGER IF EXISTS nodes_ad; DROP TRIGGER IF EXISTS nodes_au;');
-    // Drop identity index — edges re-deduped + re-indexed post-load.
-    this.db.getDb().exec('DROP INDEX IF EXISTS idx_edges_identity;');
 
     // Incremental mode: delete old nodes before re-indexing changed files.
     // Edges cascade-delete via FK on nodes.id.
@@ -642,16 +640,6 @@ export class CodeGraph {
         INSERT INTO nodes_fts(rowid, id, name, qualified_name, selector, value)
         VALUES (NEW.rowid, NEW.id, NEW.name, NEW.qualified_name, NEW.selector, NEW.value);
       END;
-    `);
-
-    // Dedup edges (bulk INSERTs may have duplicates without idx_edges_identity)
-    // and recreate the unique index.
-    this.db.getDb().exec(`
-      CREATE TEMP TABLE _dedup AS SELECT MIN(id) AS kept_id FROM edges GROUP BY source, target, kind, IFNULL(line, -1), IFNULL(col, -1);
-      CREATE INDEX _dedup_id ON _dedup(kept_id);
-      DELETE FROM edges WHERE id NOT IN (SELECT kept_id FROM _dedup);
-      DROP TABLE _dedup;
-      CREATE UNIQUE INDEX IF NOT EXISTS idx_edges_identity ON edges(source, target, kind, IFNULL(line, -1), IFNULL(col, -1));
     `);
 
     if (pool) await pool.shutdown();
