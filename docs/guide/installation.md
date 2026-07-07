@@ -129,7 +129,7 @@ This enables the `cssgraph_rule` / `cssgraph_callers` / `cssgraph_impact` tools 
 | Project | Total files | First index | Repeat index |
 |---------|-------------|-------------|-------------|
 | ~50 style files | 50 | ~15s | <1s |
-| Production monorepo | ~11K | ~11-15m | <4m |
+| Production monorepo | ~11K | ~3-5m | <4m |
 
 ## Commands & Tools
 

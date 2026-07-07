@@ -162,7 +162,7 @@ This enables `cssgraph_impact`, `cssgraph_callers`, and `cssgraph_rule` to track
 | Project | Total files | First index | Nodes | Edges |
 |---------|-------------|-------------|-------|-------|
 | Small | ~50 | ~15s | ~16K | ~50K |
-| Production monorepo | ~11K | ~11-15m | ~780K | ~22M |
+| Production monorepo | ~11K | ~3-5m | ~780K | ~22M |
 
 ---
 
@@ -209,7 +209,7 @@ This enables `cssgraph_impact`, `cssgraph_callers`, and `cssgraph_rule` to track
 | Project | Total files | First index | Nodes | Edges |
 |---------|-------------|-------------|-------|-------|
 | Small | ~50 | ~15s | ~16K | ~50K |
-| Production monorepo | ~11K | ~11-15m | ~780K | ~22M |
+| Production monorepo | ~11K | ~3-5m | ~780K | ~22M |
 
 ---
 
