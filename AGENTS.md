@@ -109,7 +109,7 @@ files       → PostCSS / CSS-in-JS / JSX extractors / template extractor
 
 **SAVEPOINT-based batch commits**: every ~100 files, the SAVEPOINT batch commits with `COMMIT`/`BEGIN`. Per-file errors roll back to the SAVEPOINT without affecting other files in the batch.
 
-**DB bulk-load optimization**: FTS5 triggers and `idx_edges_identity` are dropped before bulk indexing and recreated + rebuilt after all data is committed. This eliminates per-row B-tree/FTS overhead during the indexing phase.
+**DB bulk-load optimization**: FTS5 triggers and `idx_edges_identity` are dropped before bulk indexing. FTS5 is rebuilt in one `INSERT INTO nodes_fts ... VALUES('rebuild')` after all data is committed. The edge identity index is recreated via a fast dedup-check query (`GROUP BY ... HAVING COUNT(*) > 1 LIMIT 1`) — if no duplicates exist (the common case), `CREATE UNIQUE INDEX` runs directly. This eliminates per-row B-tree/FTS overhead during the indexing phase.
 
 **Default excludes** (built-in, not from `.gitignore`):
 - `**/*.test.*` / `**/*.stories.*` / `**/*.spec.*`
