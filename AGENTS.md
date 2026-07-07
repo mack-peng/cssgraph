@@ -122,7 +122,7 @@ Plus `.cssgraph.json` project-level `exclude` patterns.
 
 First-time setup:
 ```bash
-cssgraph init --workers 8  # index all files with 8 worker threads (~3-5m)
+cssgraph init --workers 8  # index all files with 8 worker threads (~11-15m)
 cssgraph serve --mcp        # start MCP server (auto-syncs changes)
 ```
 
@@ -135,7 +135,7 @@ cssgraph index --workers 8  # full re-index (if index corrupt or version bump)
 ## Performance
 
 Production monorepo (~11K files — 1,500 style + 1,800 view templates + 7,900 JS/TS/JSX/es6):
-- `cssgraph index --workers 8`: ~3-5m
+- `cssgraph index --workers 8`: ~11-15m
 - Reference DB: ~3GB, 780K nodes, ~22M edges
 - Repeat index (content-hash skip): <4m
 - Incremental sync: ~2s
