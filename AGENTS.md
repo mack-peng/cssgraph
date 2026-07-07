@@ -103,13 +103,13 @@ files       → PostCSS / CSS-in-JS / JSX extractors / template extractor
 
 **Single-pass bucketing**: style files go into `styleFiles[]`, ERB/Haml/HTML into `viewFiles[]`, JS/TS/JSX/TSX/es6 into `jsxFiles[]`. Style files are always indexed first so `classSelectorMap` is populated before JSX/view references are matched.
 
-**Parallel parse dispatch**: all files in a 10-file batch are dispatched to worker threads via `Promise.all`. Results are buffered and flushed sequentially in file order to preserve `classSelectorMap` correctness. Worker pool size defaults to `cpuCores - 1` (cap 8), controlled by `--workers <n>` or `CSSGRAPH_PARSE_WORKERS`.
+**Rolling-window pipeline**: files are dispatched continuously to worker threads via `feed()`. Results are buffered out-of-order in a `completed: Map<seq, item>` and drained sequentially by `drainOrdered()` → `flushOne()`. **Ref resolution happens in `flushOne()` (ordered), not `feed()` (concurrent)** — so `classSelectorMap` is always complete when JSX/view references are matched. Backpressure bound = `pool.size * 2`. Worker pool size defaults to `cpuCores - 1` (cap 8), controlled by `--workers <n>` or `CSSGRAPH_PARSE_WORKERS`.
 
 **Batch I/O reads**: 10 files read in parallel (`Promise.all(fsp.readFile)`), no unnecessary `fsp.stat` calls.
 
-**SAVEPOINT-based batch commits**: every ~100 files, the SAVEPOINT batch commits with `COMMIT`/`BEGIN`. Per-file errors roll back to the SAVEPOINT without affecting other files in the batch.
+**Batch DB inserts with periodic COMMIT**: nodes are inserted in 50-row batches, edges in 100-row batches (pre-compiled prepared statements). A `COMMIT`/`BEGIN` cycle runs every ~100 files. Per-file errors are caught at the `feed()` level; the errored file gets a sentinel empty result and is flushed with zero nodes/edges.
 
-**DB bulk-load optimization**: FTS5 triggers and `idx_edges_identity` are dropped before bulk indexing. FTS5 is rebuilt in one `INSERT INTO nodes_fts ... VALUES('rebuild')` after all data is committed. The edge identity index is recreated via a fast dedup-check query (`GROUP BY ... HAVING COUNT(*) > 1 LIMIT 1`) — if no duplicates exist (the common case), `CREATE UNIQUE INDEX` runs directly. This eliminates per-row B-tree/FTS overhead during the indexing phase.
+**DB bulk-load optimization**: FTS5 triggers and `idx_edges_identity` are dropped before bulk indexing. Edges are inserted with plain `INSERT INTO` (no unique-index B-tree probe). FTS5 is rebuilt in one `INSERT INTO nodes_fts ... VALUES('rebuild')` after all data is committed. The edge identity index is recreated via `CREATE UNIQUE INDEX`; if duplicates somehow exist, a catch block runs a one-time dedup (`DELETE ... WHERE id NOT IN (SELECT MIN(id) GROUP BY ...)`) then retries the index creation. Stats are cached in `project_metadata` at index end for fast `cssgraph status` retrieval.
 
 **Default excludes** (built-in, not from `.gitignore`):
 - `**/*.test.*` / `**/*.stories.*` / `**/*.spec.*` / `**/*.min.*`

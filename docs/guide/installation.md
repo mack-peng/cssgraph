@@ -112,9 +112,11 @@ Pass `--workers <n>` to control parallel parse threads.
 | CSS property | `css_property` | `display: flex`, `color: #333` |
 | CSS variable | `css_variable` | `--primary-color: #2563eb` |
 | At-rule | `at_rule` | `@media (max-width: 768px)`, `@keyframes fadeIn` |
+| JSX reference | `file` → edge | `className="btn primary"` in `.jsx`/`.tsx` |
+| Template reference | `file` → edge | `class="btn"` in `.erb`/`.haml`/`.html` |
 | Style file | `file` | `styles/main.scss` |
 
-By default, `cssgraph` indexes CSS, SCSS, Less, and Sass files. Excluded by default: `node_modules`, `dist`, `build`, `.git`, `.next`, test files (`*.test.*`, `*.stories.*`, `*.spec.*`), `__tests__/`, and `generated/`.
+cssgraph indexes CSS, SCSS, Less, Sass, JS, TS, JSX, TSX, ES6, ERB, Haml, and HTML files. Built-in default excludes: `**/*.test.*`, `**/*.stories.*`, `**/*.spec.*`, `**/*.min.*`, `**/__tests__/**`, `**/__snapshots__/**`, `**/__mocks__/**`, `**/generated/**`, `**/spec/**`, `**/vendor/**`. `node_modules`, `dist`, and `build` are handled by `.gitignore`.
 
 ### Indexing with JSX/TSX support (default)
 
@@ -184,7 +186,9 @@ Optional file at your project root:
 
 Built-in default excludes (always applied, even without `.cssgraph.json`):
 ```
-**/*.test.*  **/*.stories.*  **/*.spec.*  **/__tests__/**  **/generated/**
+**/*.test.*  **/*.stories.*  **/*.spec.*  **/*.min.*
+**/__tests__/**  **/__snapshots__/**  **/__mocks__/**
+**/generated/**  **/spec/**  **/vendor/**
 ```
 
 ## Upgrading

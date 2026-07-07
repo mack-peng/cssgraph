@@ -209,7 +209,7 @@ This enables `cssgraph_impact`, `cssgraph_callers`, and `cssgraph_rule` to track
 | Project | Total files | First index | Nodes | Edges |
 |---------|-------------|-------------|-------|-------|
 | Small | ~50 | ~15s | ~16K | ~50K |
-| Production monorepo | 9,400 | ~2m30s | 450K | 5.3M |
+| Production monorepo | ~11K | ~3-5m | ~780K | ~22M |
 
 ---
 
@@ -226,7 +226,7 @@ Zero-config by default. Optional `.cssgraph.json` at your project root:
 }
 ```
 
-Built-in default excludes (always applied): `*.test.*`, `*.stories.*`, `*.spec.*`, `__tests__/`, `generated/`.
+Built-in default excludes (always applied): `**/*.test.*`, `**/*.stories.*`, `**/*.spec.*`, `**/*.min.*`, `**/__tests__/**`, `**/__snapshots__/**`, `**/__mocks__/**`, `**/generated/**`, `**/spec/**`, `**/vendor/**`.
 
 ---
 
