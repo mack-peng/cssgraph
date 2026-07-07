@@ -366,18 +366,21 @@ export class CodeGraph {
     const MAX_FILE_SIZE = 1_000_000; // 1 MB
 
     const parseWorkerPath = require('path').join(__dirname, 'extraction', 'parse-worker.js');
+    const resolvedSize = resolveParsePoolSize(process.env.CSSGRAPH_PARSE_WORKERS);
     let pool: ParseWorkerPool | null = null;
     if (require('fs').existsSync(parseWorkerPath)) {
-      pool = new ParseWorkerPool({
-        size: resolveParsePoolSize(process.env.CSSGRAPH_PARSE_WORKERS),
-        workerScriptPath: parseWorkerPath,
-      });
+      pool = new ParseWorkerPool({ size: resolvedSize, workerScriptPath: parseWorkerPath });
+      console.error(`[cssgraph] parse pool: ${resolvedSize} workers (path=${parseWorkerPath})`);
+    } else {
+      console.error(`[cssgraph] parse pool DISABLED — file not found: ${parseWorkerPath} (__dirname=${__dirname})`);
     }
 
     this.db.getDb().exec('BEGIN');
 
     // Disable FTS5 triggers during bulk load — rebuilt from scratch after indexing.
     this.db.getDb().exec('DROP TRIGGER IF EXISTS nodes_ai; DROP TRIGGER IF EXISTS nodes_ad; DROP TRIGGER IF EXISTS nodes_au;');
+    // Drop unique edge index for bulk load speed — recreated after indexing.
+    this.db.getDb().exec('DROP INDEX IF EXISTS idx_edges_identity;');
 
     // Incremental mode: delete old nodes before re-indexing changed files.
     // Edges cascade-delete via FK on nodes.id.
@@ -641,6 +644,26 @@ export class CodeGraph {
         VALUES (NEW.rowid, NEW.id, NEW.name, NEW.qualified_name, NEW.selector, NEW.value);
       END;
     `);
+
+    // Reconcile edge identity index — check for duplicates first (fast path).
+    const dupCheck = this.db.getDb().prepare(
+      `SELECT 1 FROM edges GROUP BY source, target, kind, IFNULL(line, -1), IFNULL(col, -1) HAVING COUNT(*) > 1 LIMIT 1`
+    ).get();
+    if (dupCheck) {
+      // Rare: duplicates exist. Dedup then create index.
+      this.db.getDb().exec(`
+        CREATE TEMP TABLE _dedup AS SELECT MIN(id) AS kept_id FROM edges GROUP BY source, target, kind, IFNULL(line, -1), IFNULL(col, -1);
+        CREATE INDEX _dedup_id ON _dedup(kept_id);
+        DELETE FROM edges WHERE id NOT IN (SELECT kept_id FROM _dedup);
+        DROP TABLE _dedup;
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_edges_identity ON edges(source, target, kind, IFNULL(line, -1), IFNULL(col, -1));
+      `);
+    } else {
+      // Fast path: no duplicates, just recreate the index.
+      this.db.getDb().exec(
+        `CREATE UNIQUE INDEX IF NOT EXISTS idx_edges_identity ON edges(source, target, kind, IFNULL(line, -1), IFNULL(col, -1))`
+      );
+    }
 
     if (pool) await pool.shutdown();
 
