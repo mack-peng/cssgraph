@@ -29,6 +29,9 @@ export const LANGUAGES = [
   'jsx',
   'tsx',
   'es6',
+  'erb',
+  'haml',
+  'html',
   'unknown',
 ] as const;
 

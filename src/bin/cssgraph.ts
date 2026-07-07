@@ -39,7 +39,8 @@ program
   .command('init [path]')
   .description('Initialize cssgraph in a project directory and build the initial index')
   .option('-f, --force', 'Initialize even if path looks like home directory or filesystem root')
-  .action(async (pathArg: string | undefined, options: { force?: boolean }) => {
+  .option('-w, --workers <n>', 'Number of parse worker threads (default: cpu cores - 1)')
+  .action(async (pathArg: string | undefined, options: { force?: boolean; workers?: string }) => {
     const projectPath = path.resolve(pathArg || process.cwd());
 
     if (!options.force) {
@@ -64,6 +65,8 @@ program
       const cg = await CodeGraph.init(projectPath, { index: false });
 
       step(`Initialized in ${dim(projectPath)}`, 'ok');
+
+      if (options.workers) process.env.CSSGRAPH_PARSE_WORKERS = options.workers;
 
       let scanTotal = 0;
       let lastPhase = '';
@@ -93,9 +96,10 @@ program
       const hasErrors = result.filesErrored > 0;
 
       if (result.filesIndexed > 0) {
+        const skipSuffix = result.filesSkipped > 0 ? ` ${dim('│')}  ${formatNumber(result.filesSkipped)} skipped` : '';
         const filesMsg = hasErrors
-          ? `${formatNumber(result.filesIndexed)} files (${formatNumber(result.filesErrored)} failed)`
-          : `${formatNumber(result.filesIndexed)} files`;
+          ? `${formatNumber(result.filesIndexed)} files (${formatNumber(result.filesErrored)} failed)${skipSuffix}`
+          : `${formatNumber(result.filesIndexed)} files${skipSuffix}`;
         step(filesMsg, hasErrors ? 'warn' : 'ok');
         const statsMsg = `${formatNumber(result.nodesCreated)} nodes  ${dim('│')}  ${formatNumber(result.edgesCreated)} edges  ${dim('│')}  ${formatDuration(result.durationMs)}`;
         step(statsMsg, 'info');
@@ -139,7 +143,8 @@ program
   .description('Rebuild the full index from scratch')
   .option('-f, --force', 'Index even if path looks like home directory')
   .option('-q, --quiet', 'Suppress progress output')
-  .action(async (pathArg: string | undefined, options: { force?: boolean; quiet?: boolean }) => {
+  .option('-w, --workers <n>', 'Number of parse worker threads (default: cpu cores - 1)')
+  .action(async (pathArg: string | undefined, options: { force?: boolean; quiet?: boolean; workers?: string }) => {
     const projectPath = resolveProjectPath(pathArg);
 
     if (!options.force) {
@@ -163,6 +168,8 @@ program
 
       if (!options.quiet) phase('Cleaning existing data');
       cg.reinit();
+
+      if (options.workers) process.env.CSSGRAPH_PARSE_WORKERS = options.workers;
 
       let scanTotal = 0;
       let lastPhase = '';
@@ -188,7 +195,8 @@ program
         if (lastPhase) phaseComplete();
 
         if (result.filesIndexed > 0) {
-          step(`${formatNumber(result.filesIndexed)} files`, 'ok');
+          const skipPart = result.filesSkipped > 0 ? ` ${dim('│')}  ${formatNumber(result.filesSkipped)} skipped` : '';
+          step(`${formatNumber(result.filesIndexed)} files${skipPart}`, 'ok');
           step(`${formatNumber(result.nodesCreated)} nodes  ${dim('│')}  ${formatNumber(result.edgesCreated)} edges  ${dim('│')}  ${formatDuration(result.durationMs)}`, 'info');
         } else {
           step('No style files found', 'warn');
