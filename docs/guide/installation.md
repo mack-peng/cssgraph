@@ -93,14 +93,16 @@ Restart your agent for the MCP server to load. Once restarted, the agent will se
 
 ```bash
 cd your-project
-cssgraph init
+cssgraph init --workers 8
 ```
 
 Indexes all style files **plus** JSX/TSX/JS/TS className references,
-CSS-in-JS, and CSS Modules — one command enables every MCP tool.
+CSS-in-JS, CSS Modules, and view templates (ERB/Haml/HTML) —
+one command enables every MCP tool.
 
-JSX scanning is on by default — it's required for `cssgraph_impact`,
-`cssgraph_callers`, and `cssgraph_rule` to work.
+JSX and view file scanning is on by default — it's required for
+`cssgraph_impact`, `cssgraph_callers`, and `cssgraph_rule` to work.
+Pass `--workers <n>` to control parallel parse threads.
 
 ### What gets indexed
 
@@ -116,17 +118,16 @@ By default, `cssgraph` indexes CSS, SCSS, Less, and Sass files. Excluded by defa
 
 ### Indexing with JSX/TSX support (default)
 
-JSX scanning is always enabled. cssgraph scans `.jsx`, `.tsx`, `.js`, `.ts`, and `.es6` files
-for className references and CSS modules:
+JSX and view template scanning is always enabled. cssgraph scans `.jsx`, `.tsx`, `.js`, `.ts`, `.es6`, `.erb`, `.haml`, and `.html` files for className references:
 
-This enables the `cssgraph_rule` / `cssgraph_callers` / `cssgraph_impact` tools to report which component files reference each className. Style files are always indexed first so references can be matched.
+This enables the `cssgraph_rule` / `cssgraph_callers` / `cssgraph_impact` tools to report which component and template files reference each className. Style files are always indexed first so references can be matched.
 
 ### Indexing scale
 
 | Project | Total files | First index | Repeat index |
 |---------|-------------|-------------|-------------|
 | ~50 style files | 50 | ~15s | <1s |
-| Production monorepo | 9,400 | ~2m30s | <4m |
+| Production monorepo | ~11K | ~3-5m | <4m |
 
 ## Commands & Tools
 
@@ -196,7 +197,7 @@ After upgrading, re-index each project:
 
 ```bash
 cd your-project
-cssgraph index
+cssgraph index --workers 8
 ```
 
 ## Uninstall

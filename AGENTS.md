@@ -4,7 +4,7 @@ This file provides guidance to AI coding agents (opencode, Claude Code, Cursor, 
 
 ## Project Overview
 
-cssgraph is a local-first CSS intelligence library + CLI + MCP server. It parses CSS/SCSS/Less/Sass files with PostCSS, extracts classNames/properties/variables/at-rules and JSX className references into SQLite (FTS5), and exposes a knowledge graph to AI agents over MCP. Per-project data lives in `.cssgraph/`. Extraction is deterministic — derived from PostCSS AST, not LLM-summarized.
+cssgraph is a local-first CSS intelligence library + CLI + MCP server. It parses CSS/SCSS/Less/Sass files with PostCSS, extracts classNames/properties/variables/at-rules, JSX className references, and view template class attributes into SQLite (FTS5), and exposes a knowledge graph to AI agents over MCP. Per-project data lives in `.cssgraph/`. Extraction is deterministic — derived from PostCSS AST, not LLM-summarized.
 
 Distributed as `cssgraph` on npm; same binary serves as indexer and MCP server.
 
@@ -28,13 +28,13 @@ Node engines: `>=22.5.0 <25.0.0` (`node:sqlite` is required).
 ## Architecture
 
 ```
-files       → PostCSS / CSS-in-JS / JSX extractors
-              ↓
-                DB (nodes/edges/files)
-              ↓
-                GraphTraverser (BFS/DFS, callers, callees, impact)
-              ↓
-                ContextBuilder (markdown output for AI consumption)
+files       → PostCSS / CSS-in-JS / JSX extractors / template extractor
+               ↓
+                 DB (nodes/edges/files)
+               ↓
+                 GraphTraverser (BFS/DFS, callers, callees, impact)
+               ↓
+                 ContextBuilder (markdown output for AI consumption)
 ```
 
 ### Module layout
@@ -44,12 +44,14 @@ files       → PostCSS / CSS-in-JS / JSX extractors
 - `src/extraction/` — Extractors:
   - `postcss-extractor.ts` — PostCSS parsing core (css/scss/less/sass/pcss)
   - `css-in-js-extractor.ts` — styled-components / emotion `css` templates
-  - `jsx-classname-extractor.ts` — JSX `className="..."` reference extraction
+  - `jsx-classname-extractor.ts` — JSX `className="..."` reference extraction (O(n) line lookup via pre-computed offset table)
+  - `template-classname-extractor.ts` — ERB/Haml/HTML `class="..."` and Haml `.classname` extraction
   - `css-modules-resolver.ts` — dynamic `import()` / `require()` CSS module detection
   - `selector-builder.ts` — Less/SCSS nesting expansion (`&` handling)
   - `specificity.ts` — CSS specificity calculator
   - `tailwind-mapper.ts` — Tailwind v3 JS config + v4 `@theme` mapping
   - `git-scanner.ts` — `git ls-files` fast file discovery (fallback to filesystem walk)
+  - `parse-pool.ts` — Worker thread pool for parallel PostCSS parsing
 - `src/graph/` — `GraphTraverser` (BFS/DFS, impact radius, path finding) and `GraphQueryManager` (high-level queries: `analyzeRule`, `getCascade`, `getSelectorDetails`).
 - `src/context/` — `ContextBuilder` for markdown output.
 - `src/sync/` — `FileWatcher` (native FS events) with debounce + filter.
@@ -74,6 +76,9 @@ files       → PostCSS / CSS-in-JS / JSX extractors
 | `.jsx` / `.tsx` | jsx/tsx | className references + CSS-in-JS |
 | `.js` / `.ts` | js/ts | className + CSS Modules |
 | `.es6` | es6 | Treated as JS |
+| `.erb` | erb | `class="..."` attribute extraction |
+| `.haml` | haml | `.classname` shorthand + `{:class =>}` hash |
+| `.html` | html | `class="..."` attribute extraction |
 
 ## MCP Tools
 
@@ -96,13 +101,15 @@ files       → PostCSS / CSS-in-JS / JSX extractors
 
 **Git-first file discovery**: `git ls-files` lists all tracked + untracked-not-ignored files (auto-respects `.gitignore`; no `ignore` library needed). Falls back to explicit-stack filesystem walk for non-git projects.
 
-**Single-pass bucketing**: style files go into `styleFiles[]`, JS/TS/JSX/TSX/es6 into `jsxFiles[]`. Style files are always indexed first so `classSelectorMap` is populated before JSX references are matched.
+**Single-pass bucketing**: style files go into `styleFiles[]`, ERB/Haml/HTML into `viewFiles[]`, JS/TS/JSX/TSX/es6 into `jsxFiles[]`. Style files are always indexed first so `classSelectorMap` is populated before JSX/view references are matched.
 
-**Batch I/O reads**: 10 files read in parallel (`Promise.all(fsp.readFile)`), then parsed sequentially to keep `classSelectorMap` deterministic.
+**Parallel parse dispatch**: all files in a 10-file batch are dispatched to worker threads via `Promise.all`. Results are buffered and flushed sequentially in file order to preserve `classSelectorMap` correctness. Worker pool size defaults to `cpuCores - 1` (cap 8), controlled by `--workers <n>` or `CSSGRAPH_PARSE_WORKERS`.
+
+**Batch I/O reads**: 10 files read in parallel (`Promise.all(fsp.readFile)`), no unnecessary `fsp.stat` calls.
 
 **SAVEPOINT-based batch commits**: every ~100 files, the SAVEPOINT batch commits with `COMMIT`/`BEGIN`. Per-file errors roll back to the SAVEPOINT without affecting other files in the batch.
 
-**Ordered flush (Worker-pool ready)**: parsed results are buffered in a `completed: Map<seq, item>` and flushed via `flushOrdered()` in file order. Today parse is serial so it drains immediately; the structure supports out-of-order Worker-pool returns.
+**DB bulk-load optimization**: FTS5 triggers and `idx_edges_identity` are dropped before bulk indexing and recreated + rebuilt after all data is committed. This eliminates per-row B-tree/FTS overhead during the indexing phase.
 
 **Default excludes** (built-in, not from `.gitignore`):
 - `**/*.test.*` / `**/*.stories.*` / `**/*.spec.*`
@@ -114,21 +121,23 @@ Plus `.cssgraph.json` project-level `exclude` patterns.
 
 First-time setup:
 ```bash
-cssgraph init            # index style + JSX files (~3m)
-cssgraph serve --mcp     # start MCP server (auto-syncs changes)
+cssgraph init --workers 8  # index all files with 8 worker threads (~3-5m)
+cssgraph serve --mcp        # start MCP server (auto-syncs changes)
 ```
 
 After checkout or edits:
 ```bash
-cssgraph sync            # incremental update (~2s)
-cssgraph index           # full re-index (if index corrupt or version bump)
+cssgraph sync               # incremental update (~2s)
+cssgraph index --workers 8  # full re-index (if index corrupt or version bump)
 ```
 
 ## Performance
 
-Production monorepo (~9,400 files — 1,500 style + 7,900 JS/TS/JSX/es6):
-- `cssgraph index`: ~2m30s
-- Reference DB: ~2GB, 450K nodes, 5.3M edges
+Production monorepo (~11K files — 1,500 style + 1,800 view templates + 7,900 JS/TS/JSX/es6):
+- `cssgraph index --workers 8`: ~3-5m
+- Reference DB: ~3GB, 780K nodes, ~22M edges
+- Repeat index (content-hash skip): <4m
+- Incremental sync: ~2s
 
 ## House rules
 

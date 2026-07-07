@@ -55,13 +55,13 @@ curl -s https://raw.githubusercontent.com/mack-peng/cssgraph/main/docs/guide/ins
 ```bash
 npm i -g cssgraph
 cd your-project
-cssgraph init
+cssgraph init --workers 8
 ```
 
-Indexes all style files (CSS, SCSS, Less, Sass) **plus** JSX/TSX className
-references, CSS-in-JS, and CSS Modules — enabling every MCP tool.
+Indexes all style files (CSS, SCSS, Less, Sass), JSX/TSX className references,
+CSS-in-JS, CSS Modules, **and** view templates (ERB/Haml/HTML) — enabling every MCP tool.
 
-JSX scanning is on by default (it's required for `cssgraph_impact`, `cssgraph_callers`, and `cssgraph_rule` to work).
+Pass `--workers <n>` to control parallel parse threads (default: cpu cores - 1).
 
 Requires Node.js >= 22.5.0 (for `node:sqlite`).
 
@@ -119,45 +119,50 @@ Auto-sync is enabled by default. The MCP server watches your project and updates
 └───────────────────────────────────────────────────────────┘
 ```
 
-1. **Extraction** — PostCSS parses CSS/SCSS/Less/Sass into ASTs. CSS-in-JS (`styled.div`) and JSX className references extracted from `.jsx`/`.tsx` files.
-2. **Storage** — Everything goes into a local SQLite database (`.cssgraph/cssgraph.db`) with FTS5 full-text search. WAL-mode + batch commits for write performance.
-3. **Graph** — Edges connect related nodes: `contains` (selector→property), `nests` (parent→child selector), `overrides` (higher specificity selector overrides lower), `imports` (file→imported file), `references` (JSX file→className, property→CSS variable).
+1. **Extraction** — PostCSS parses CSS/SCSS/Less/Sass into ASTs. CSS-in-JS (`styled.div`), JSX className references, and template class attributes extracted from `.jsx`/`.tsx`/`.erb`/`.haml` files.
+2. **Storage** — Everything goes into a local SQLite database (`.cssgraph/cssgraph.db`) with FTS5 full-text search. WAL-mode + batch commits for write performance. FTS triggers and unique indexes are deferred during bulk load for speed.
+3. **Graph** — Edges connect related nodes: `contains` (selector→property), `nests` (parent→child selector), `overrides` (higher specificity selector overrides lower), `imports` (file→imported file), `references` (JSX/view file→className, property→CSS variable).
 4. **Git-first scanning** — `git ls-files` for instant file discovery. Falls back to filesystem walk on non-git projects.
-5. **Auto-Sync** — Native OS file events, debounced, incrementally synced.
+5. **Parallel parsing** — Files dispatched in batches to worker threads via `Promise.all`. Parses complete concurrently; results flushed in file order for correctness.
+6. **Auto-Sync** — Native OS file events, debounced, incrementally synced.
 
 ---
 
 ## CLI Reference
 
 ```bash
-cssgraph init [path]                 # Initialize + build graph
-cssgraph index [path]                # Rebuild from scratch
-cssgraph query <className>           # Search for className selectors
-cssgraph explore <query...>          # Full style context for a className
-cssgraph details <selector>          # O(1) exact selector → file:line lookup
-cssgraph rule <selector> [--strict]  # Selector impact: exact + loose/strict files
-cssgraph impact-selector <selector> # Code files affected by a selector
-cssgraph impact <className>          # Blast radius of changing a className
-cssgraph unused                      # Find unreferenced class selectors
-cssgraph cascade <className>         # Visualize cascade path
-cssgraph property <query...>         # Search by CSS property value
-cssgraph files [path]                # Project style file tree
-cssgraph status [path]               # Index statistics
-cssgraph sync [path]                 # Incremental update
-cssgraph serve --mcp                 # Start MCP server
-cssgraph install                     # Auto-wire to your AI agent
-cssgraph uninstall                   # Remove from your AI agent
-cssgraph version                     # Print installed version
+cssgraph init [path] [-w, --workers <n>]  # Initialize + build graph
+cssgraph index [path] [-w, --workers <n>]  # Rebuild from scratch
+cssgraph query <className>                 # Search for className selectors
+cssgraph explore <query...>                # Full style context for a className
+cssgraph details <selector>                # O(1) exact selector → file:line lookup
+cssgraph rule <selector> [--strict]        # Selector impact: exact + loose/strict files
+cssgraph impact-selector <selector>       # Code files affected by a selector
+cssgraph impact <className>                # Blast radius of changing a className
+cssgraph unused                            # Find unreferenced class selectors
+cssgraph cascade <className>               # Visualize cascade path
+cssgraph property <query...>               # Search by CSS property value
+cssgraph files [path]                      # Project style file tree
+cssgraph status [path]                     # Index statistics
+cssgraph sync [path]                       # Incremental update
+cssgraph serve --mcp                       # Start MCP server
+cssgraph install                           # Auto-wire to your AI agent
+cssgraph uninstall                         # Remove from your AI agent
+cssgraph version                           # Print installed version
 ```
 
-### JSX Scanning (default)
+### JSX and View File Scanning (default)
 
-JSX scanning is **always enabled**. cssgraph scans `.jsx`/`.tsx`/`.js`/`.ts`/`.es6` files for:
-- **className references** — `className="btn primary"` → builds `references` edges from component files to className nodes
-- **CSS-in-JS** — `styled.div\`...\`` and `css\`...\`` templates
-- **CSS Modules** — `import styles from './X.module.css'` and dynamic `import()` / `require()`
+cssgraph always scans:
+- **JSX/TSX/JS/TS/ES6** — `className` references, CSS-in-JS, CSS Modules
+- **View templates** — `.erb`, `.haml`, `.html` files for `class="..."` attributes and Haml `.classname` shorthand
 
-On a production monorepo, this adds ~9,400 files to the index (~2m30s initial, <4s incremental).
+This enables `cssgraph_impact`, `cssgraph_callers`, and `cssgraph_rule` to track both component files AND template files that reference each className.
+
+| Project | Total files | First index | Nodes | Edges |
+|---------|-------------|-------------|-------|-------|
+| Small | ~50 | ~15s | ~16K | ~50K |
+| Production monorepo | ~11K | ~3-5m | ~780K | ~22M |
 
 ---
 
@@ -191,6 +196,9 @@ On a production monorepo, this adds ~9,400 files to the index (~2m30s initial, <
 | PostCSS custom | `.pcss` | PostCSS standard |
 | JSX / TSX | `.jsx` `.tsx` | className + CSS-in-JS |
 | JavaScript / TypeScript | `.js` `.ts` `.es6` | className + CSS Modules |
+| ERB (Rails) | `.erb` | `class="..."` extraction |
+| Haml (Rails) | `.haml` | `.classname` + `{:class =>}` extraction |
+| HTML | `.html` | `class="..."` extraction |
 | CSS Modules | `.module.css` `.module.scss` `.module.less` | Dynamic import resolution |
 | Tailwind | `tailwind.config.js` + CSS `@theme` | v3 JS config + v4 CSS config |
 
