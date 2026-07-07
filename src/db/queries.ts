@@ -129,6 +129,62 @@ export class QueryBuilder {
     );
   }
 
+  insertEdgesBatch(edges: Edge[]): void {
+    if (edges.length === 0) return;
+    const BATCH = 100;
+    for (let i = 0; i < edges.length; i += BATCH) {
+      const chunk = edges.slice(i, i + BATCH);
+      const placeholders = chunk.map(() => '(?, ?, ?, ?, ?, ?, ?)').join(', ');
+      const sql = `INSERT OR IGNORE INTO edges (source, target, kind, metadata, line, col, provenance) VALUES ${placeholders}`;
+      const params: (string | number | null)[] = [];
+      for (const edge of chunk) {
+        params.push(
+          edge.source,
+          edge.target,
+          edge.kind,
+          edge.metadata ? JSON.stringify(edge.metadata) : null,
+          edge.line ?? null,
+          edge.column ?? null,
+          edge.provenance ?? null,
+        );
+      }
+      this.db.prepare(sql).run(...params);
+    }
+  }
+
+  insertNodesBatch(nodes: Node[]): void {
+    if (nodes.length === 0) return;
+    const BATCH = 50;
+    for (let i = 0; i < nodes.length; i += BATCH) {
+      const chunk = nodes.slice(i, i + BATCH);
+      const placeholders = chunk.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').join(', ');
+      const sql = `INSERT OR REPLACE INTO nodes (id, kind, name, qualified_name, file_path, language, start_line, end_line, start_column, end_column, signature, specificity, properties, selector, params, value, updated_at) VALUES ${placeholders}`;
+      const params: (string | number | null)[] = [];
+      for (const node of chunk) {
+        params.push(
+          node.id ?? hashId(node.qualifiedName),
+          node.kind,
+          node.name,
+          node.qualifiedName,
+          node.filePath,
+          node.language,
+          node.startLine,
+          node.endLine,
+          node.startColumn,
+          node.endColumn,
+          node.signature ?? null,
+          node.specificity ? JSON.stringify(node.specificity) : null,
+          node.properties ? JSON.stringify(node.properties) : null,
+          node.selector ?? null,
+          node.params ?? null,
+          node.value ?? null,
+          node.updatedAt,
+        );
+      }
+      this.db.prepare(sql).run(...params);
+    }
+  }
+
   getNodeById(id: string): Node | null {
     const row = this.db.prepare('SELECT * FROM nodes WHERE id = ?').get(id) as Record<string, unknown> | undefined;
     return row ? this.rowToNode(row) : null;

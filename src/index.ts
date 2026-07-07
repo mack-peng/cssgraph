@@ -379,8 +379,6 @@ export class CodeGraph {
 
     // Disable FTS5 triggers during bulk load — rebuilt from scratch after indexing.
     this.db.getDb().exec('DROP TRIGGER IF EXISTS nodes_ai; DROP TRIGGER IF EXISTS nodes_ad; DROP TRIGGER IF EXISTS nodes_au;');
-    // Drop unique edge index for bulk load speed — recreated after indexing.
-    this.db.getDb().exec('DROP INDEX IF EXISTS idx_edges_identity;');
 
     // Incremental mode: delete old nodes before re-indexing changed files.
     // Edges cascade-delete via FK on nodes.id.
@@ -575,19 +573,18 @@ export class CodeGraph {
             CodeGraph.flushOrdered(completed, storeCursor, (item) => {
               this.db.getDb().exec('SAVEPOINT sp');
 
+              this.queries.insertNodesBatch(item.result.nodes);
+              totalNodes += item.result.nodes.length;
               for (const node of item.result.nodes) {
-                this.queries.insertNode(node);
-                totalNodes++;
                 if (node.kind === 'class_selector' && !node.name.startsWith('#')) {
                   const list = classSelectorMap.get(node.name) || [];
                   list.push(node.id);
                   classSelectorMap.set(node.name, list);
                 }
               }
-              for (const edge of item.result.edges) {
-                this.queries.insertEdge(edge);
-                totalEdges++;
-              }
+
+              this.queries.insertEdgesBatch(item.result.edges);
+              totalEdges += item.result.edges.length;
 
               this.queries.insertFile({
                 path: item.filePath, contentHash: item.contentHash,
@@ -644,26 +641,6 @@ export class CodeGraph {
         VALUES (NEW.rowid, NEW.id, NEW.name, NEW.qualified_name, NEW.selector, NEW.value);
       END;
     `);
-
-    // Reconcile edge identity index — check for duplicates first (fast path).
-    const dupCheck = this.db.getDb().prepare(
-      `SELECT 1 FROM edges GROUP BY source, target, kind, IFNULL(line, -1), IFNULL(col, -1) HAVING COUNT(*) > 1 LIMIT 1`
-    ).get();
-    if (dupCheck) {
-      // Rare: duplicates exist. Dedup then create index.
-      this.db.getDb().exec(`
-        CREATE TEMP TABLE _dedup AS SELECT MIN(id) AS kept_id FROM edges GROUP BY source, target, kind, IFNULL(line, -1), IFNULL(col, -1);
-        CREATE INDEX _dedup_id ON _dedup(kept_id);
-        DELETE FROM edges WHERE id NOT IN (SELECT kept_id FROM _dedup);
-        DROP TABLE _dedup;
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_edges_identity ON edges(source, target, kind, IFNULL(line, -1), IFNULL(col, -1));
-      `);
-    } else {
-      // Fast path: no duplicates, just recreate the index.
-      this.db.getDb().exec(
-        `CREATE UNIQUE INDEX IF NOT EXISTS idx_edges_identity ON edges(source, target, kind, IFNULL(line, -1), IFNULL(col, -1))`
-      );
-    }
 
     if (pool) await pool.shutdown();
 
