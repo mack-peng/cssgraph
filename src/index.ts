@@ -377,6 +377,9 @@ export class CodeGraph {
 
     this.db.getDb().exec('BEGIN');
 
+    // Invalidate stale stats cache before bulk load.
+    try { this.queries.invalidateStatsCache(); } catch { /* ok */ }
+
     // Disable FTS5 triggers during bulk load — rebuilt from scratch after indexing.
     this.db.getDb().exec('DROP TRIGGER IF EXISTS nodes_ai; DROP TRIGGER IF EXISTS nodes_ad; DROP TRIGGER IF EXISTS nodes_au;');
 
@@ -656,6 +659,20 @@ export class CodeGraph {
         }
       }
     }
+
+    // Write stats cache for fast `cssgraph status` retrieval.
+    try {
+      this.queries.cacheStats({
+        nodeCount: totalNodes,
+        edgeCount: totalEdges,
+        fileCount: filesIndexed + filesSkipped,
+        nodesByKind: {},
+        edgesByKind: {},
+        filesByLanguage: {},
+        dbSizeBytes: 0,
+        lastUpdated: Date.now(),
+      });
+    } catch { /* best-effort */ }
 
     return {
       success: filesErrored === 0,

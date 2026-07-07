@@ -12,6 +12,8 @@ export class QueryBuilder {
   private insertNodeStmt: StatementSync;
   private insertEdgeStmt: StatementSync;
   private insertFileStmt: StatementSync;
+  private insertEdgeBatch100Stmt: StatementSync;
+  private insertNodeBatch50Stmt: StatementSync;
   private classSelectorsWithoutRefsStmt: StatementSync;
   private classSelectorsByNameStmt: StatementSync;
   private classSelectorsBySelectorStmt: StatementSync;
@@ -32,6 +34,16 @@ export class QueryBuilder {
       INSERT OR IGNORE INTO edges (source, target, kind, metadata, line, col, provenance)
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `);
+    // Pre-compiled 100-row batch INSERT for edges (compiled ONCE, reused for all batches).
+    const edgePh100 = Array(100).fill('(?, ?, ?, ?, ?, ?, ?)').join(', ');
+    this.insertEdgeBatch100Stmt = db.prepare(
+      `INSERT OR IGNORE INTO edges (source, target, kind, metadata, line, col, provenance) VALUES ${edgePh100}`
+    );
+    // Pre-compiled 50-row batch INSERT for nodes.
+    const nodePh50 = Array(50).fill('(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').join(', ');
+    this.insertNodeBatch50Stmt = db.prepare(
+      `INSERT OR REPLACE INTO nodes (id, kind, name, qualified_name, file_path, language, start_line, end_line, start_column, end_column, signature, specificity, properties, selector, params, value, updated_at) VALUES ${nodePh50}`
+    );
     this.insertFileStmt = db.prepare(`
       INSERT OR REPLACE INTO files (path, content_hash, language, size, modified_at, indexed_at, node_count, errors)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -132,12 +144,12 @@ export class QueryBuilder {
   insertEdgesBatch(edges: Edge[]): void {
     if (edges.length === 0) return;
     const BATCH = 100;
-    for (let i = 0; i < edges.length; i += BATCH) {
-      const chunk = edges.slice(i, i + BATCH);
-      const placeholders = chunk.map(() => '(?, ?, ?, ?, ?, ?, ?)').join(', ');
-      const sql = `INSERT OR IGNORE INTO edges (source, target, kind, metadata, line, col, provenance) VALUES ${placeholders}`;
+    let i = 0;
+    // Full 100-row batches use the pre-compiled statement (no prepare overhead).
+    for (; i + BATCH <= edges.length; i += BATCH) {
       const params: (string | number | null)[] = [];
-      for (const edge of chunk) {
+      for (let j = i; j < i + BATCH; j++) {
+        const edge = edges[j]!;
         params.push(
           edge.source,
           edge.target,
@@ -148,19 +160,23 @@ export class QueryBuilder {
           edge.provenance ?? null,
         );
       }
-      this.db.prepare(sql).run(...params);
+      this.insertEdgeBatch100Stmt.run(...params);
+    }
+    // Remaining < 100 rows fall back to single-row prepared statement.
+    for (; i < edges.length; i++) {
+      this.insertEdge(edges[i]!);
     }
   }
 
   insertNodesBatch(nodes: Node[]): void {
     if (nodes.length === 0) return;
     const BATCH = 50;
-    for (let i = 0; i < nodes.length; i += BATCH) {
-      const chunk = nodes.slice(i, i + BATCH);
-      const placeholders = chunk.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').join(', ');
-      const sql = `INSERT OR REPLACE INTO nodes (id, kind, name, qualified_name, file_path, language, start_line, end_line, start_column, end_column, signature, specificity, properties, selector, params, value, updated_at) VALUES ${placeholders}`;
+    let i = 0;
+    // Full 50-row batches use the pre-compiled statement.
+    for (; i + BATCH <= nodes.length; i += BATCH) {
       const params: (string | number | null)[] = [];
-      for (const node of chunk) {
+      for (let j = i; j < i + BATCH; j++) {
+        const node = nodes[j]!;
         params.push(
           node.id ?? hashId(node.qualifiedName),
           node.kind,
@@ -181,7 +197,11 @@ export class QueryBuilder {
           node.updatedAt,
         );
       }
-      this.db.prepare(sql).run(...params);
+      this.insertNodeBatch50Stmt.run(...params);
+    }
+    // Remaining < 50 rows fall back to single-row prepared statement.
+    for (; i < nodes.length; i++) {
+      this.insertNode(nodes[i]!);
     }
   }
 
@@ -397,6 +417,38 @@ export class QueryBuilder {
   // ===========================================================================
 
   getStats(): GraphStats {
+    // Try cached stats first (written at end of indexing).
+    try {
+      const cached = this.db.prepare(
+        `SELECT value FROM project_metadata WHERE key = 'stats_cached'`
+      ).get() as { value: string } | undefined;
+      if (cached?.value === '1') {
+        const nodeCount = Number((this.db.prepare(
+          `SELECT value FROM project_metadata WHERE key = 'stats_node_count'`
+        ).get() as { value: string })?.value ?? '0');
+        const edgeCount = Number((this.db.prepare(
+          `SELECT value FROM project_metadata WHERE key = 'stats_edge_count'`
+        ).get() as { value: string })?.value ?? '0');
+        const fileCount = Number((this.db.prepare(
+          `SELECT value FROM project_metadata WHERE key = 'stats_file_count'`
+        ).get() as { value: string })?.value ?? '0');
+        const lastUpdated = Number((this.db.prepare(
+          `SELECT value FROM project_metadata WHERE key = 'stats_last_updated'`
+        ).get() as { value: string })?.value ?? '0');
+        const nodesByKind = JSON.parse((this.db.prepare(
+          `SELECT value FROM project_metadata WHERE key = 'stats_nodes_by_kind'`
+        ).get() as { value: string })?.value ?? '{}') as Record<string, number>;
+        const edgesByKind = JSON.parse((this.db.prepare(
+          `SELECT value FROM project_metadata WHERE key = 'stats_edges_by_kind'`
+        ).get() as { value: string })?.value ?? '{}') as Record<string, number>;
+        const filesByLanguage = JSON.parse((this.db.prepare(
+          `SELECT value FROM project_metadata WHERE key = 'stats_files_by_language'`
+        ).get() as { value: string })?.value ?? '{}') as Record<string, number>;
+        return { nodeCount, edgeCount, fileCount, nodesByKind, edgesByKind, filesByLanguage, dbSizeBytes: 0, lastUpdated };
+      }
+    } catch { /* fall through to live computation */ }
+
+    // Live computation (slow for large DBs, used when no cache exists).
     const nodeCount = (this.db.prepare('SELECT COUNT(*) as cnt FROM nodes').get() as { cnt: number })?.cnt ?? 0;
     const edgeCount = (this.db.prepare('SELECT COUNT(*) as cnt FROM edges').get() as { cnt: number })?.cnt ?? 0;
     const fileCount = (this.db.prepare('SELECT COUNT(*) as cnt FROM files').get() as { cnt: number })?.cnt ?? 0;
@@ -426,6 +478,29 @@ export class QueryBuilder {
       dbSizeBytes: 0,
       lastUpdated: lastUpdatedRow?.max ?? 0,
     };
+  }
+
+  /** Write stats to project_metadata for fast retrieval. Called at end of indexing. */
+  cacheStats(stats: GraphStats): void {
+    const now = Date.now();
+    const upsert = this.db.prepare(
+      `INSERT OR REPLACE INTO project_metadata (key, value, updated_at) VALUES (?, ?, ?)`
+    );
+    upsert.run('stats_cached', '1', now);
+    upsert.run('stats_node_count', String(stats.nodeCount), now);
+    upsert.run('stats_edge_count', String(stats.edgeCount), now);
+    upsert.run('stats_file_count', String(stats.fileCount), now);
+    upsert.run('stats_last_updated', String(stats.lastUpdated), now);
+    upsert.run('stats_nodes_by_kind', JSON.stringify(stats.nodesByKind), now);
+    upsert.run('stats_edges_by_kind', JSON.stringify(stats.edgesByKind), now);
+    upsert.run('stats_files_by_language', JSON.stringify(stats.filesByLanguage), now);
+  }
+
+  /** Invalidate cached stats (call before re-indexing). */
+  invalidateStatsCache(): void {
+    try {
+      this.db.prepare(`DELETE FROM project_metadata WHERE key LIKE 'stats_%'`).run();
+    } catch { /* table may not exist yet */ }
   }
 
   getNodeAndEdgeCount(): { nodes: number; edges: number } {
