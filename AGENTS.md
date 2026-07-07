@@ -71,9 +71,9 @@ files       → PostCSS / CSS-in-JS / JSX extractors
 | `.less` | less | postcss-less plugin |
 | `.sass` | sass | Compile via `sass` package, then PostCSS |
 | `.pcss` | pcss | PostCSS standard |
-| `.jsx` / `.tsx` | jsx/tsx | className references + CSS-in-JS (`--jsx`) |
-| `.js` / `.ts` | js/ts | className + CSS Modules (`--jsx`) |
-| `.es6` | es6 | Treated as JS (`--jsx`) |
+| `.jsx` / `.tsx` | jsx/tsx | className references + CSS-in-JS |
+| `.js` / `.ts` | js/ts | className + CSS Modules |
+| `.es6` | es6 | Treated as JS |
 
 ## MCP Tools
 
@@ -96,7 +96,7 @@ files       → PostCSS / CSS-in-JS / JSX extractors
 
 **Git-first file discovery**: `git ls-files` lists all tracked + untracked-not-ignored files (auto-respects `.gitignore`; no `ignore` library needed). Falls back to explicit-stack filesystem walk for non-git projects.
 
-**Single-pass bucketing**: style files go into `styleFiles[]`, JS/TS/JSX/TSX/es6 into `jsxFiles[]` (opt-in via `--jsx`). Style files are always indexed first so `classSelectorMap` is populated before JSX references are matched.
+**Single-pass bucketing**: style files go into `styleFiles[]`, JS/TS/JSX/TSX/es6 into `jsxFiles[]`. Style files are always indexed first so `classSelectorMap` is populated before JSX references are matched.
 
 **Batch I/O reads**: 10 files read in parallel (`Promise.all(fsp.readFile)`), then parsed sequentially to keep `classSelectorMap` deterministic.
 
@@ -114,21 +114,20 @@ Plus `.cssgraph.json` project-level `exclude` patterns.
 
 First-time setup:
 ```bash
-cssgraph init --jsx      # index style + JSX files (~3m)
-cssgraph serve --mcp      # start MCP server (auto-syncs changes)
+cssgraph init            # index style + JSX files (~3m)
+cssgraph serve --mcp     # start MCP server (auto-syncs changes)
 ```
 
 After checkout or edits:
 ```bash
 cssgraph sync            # incremental update (~2s)
-cssgraph index --jsx     # full re-index (if index corrupt or version bump)
+cssgraph index           # full re-index (if index corrupt or version bump)
 ```
 
 ## Performance
 
 Production monorepo (~9,400 files — 1,500 style + 7,900 JS/TS/JSX/es6):
-- `cssgraph index` (style only): ~45s
-- `cssgraph index --jsx`: ~2m30s
+- `cssgraph index`: ~2m30s
 - Reference DB: ~2GB, 450K nodes, 5.3M edges
 
 ## House rules

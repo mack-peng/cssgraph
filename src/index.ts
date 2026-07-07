@@ -49,7 +49,6 @@ export interface IndexOptions {
   onProgress?: (progress: IndexProgress) => void;
   signal?: AbortSignal;
   verbose?: boolean;
-  jsx?: boolean;
 }
 
 export class CodeGraph {
@@ -211,7 +210,7 @@ export class CodeGraph {
       // Incremental mode: use pre-computed file list (already in correct order).
       for (const relativePath of fileFilter) {
         if (isJSXFile(relativePath)) {
-          if (options.jsx) jsxFiles.push(relativePath);
+          jsxFiles.push(relativePath);
         } else {
           styleFiles.push(relativePath);
         }
@@ -223,7 +222,6 @@ export class CodeGraph {
         const lang = detectLanguage(relativePath);
         if (!isLanguageSupported(lang)) continue;
         if (isJSXFile(relativePath)) {
-          if (!options.jsx) continue;
           jsxFiles.push(relativePath);
         } else {
           styleFiles.push(relativePath);
@@ -262,7 +260,6 @@ export class CodeGraph {
               const lang = detectLanguage(relativePath);
               if (!isLanguageSupported(lang)) continue;
               if (isJSXFile(relativePath)) {
-                if (!options.jsx) continue;
                 jsxFiles.push(relativePath);
               } else {
                 styleFiles.push(relativePath);
@@ -281,9 +278,7 @@ export class CodeGraph {
     }
 
     // Style files must be indexed before JSX files so class selectors exist for references.
-    const orderedFiles = options.jsx
-      ? [...styleFiles, ...jsxFiles]
-      : styleFiles;
+    const orderedFiles = [...styleFiles, ...jsxFiles];
 
     if (options.onProgress) {
       options.onProgress({ phase: 'scanning', current: orderedFiles.length, total: orderedFiles.length });
@@ -651,7 +646,6 @@ export class CodeGraph {
           const lang = detectLanguage(fp);
           if (lang === 'unknown' || !isLanguageSupported(lang)) continue;
           if (lang !== 'less' && lang !== 'scss' && lang !== 'css' && lang !== 'sass' && lang !== 'pcss') {
-            if (!options.jsx) continue;
             if (!isJSXFile(fp)) continue;
           }
 
@@ -681,7 +675,7 @@ export class CodeGraph {
         const changedFiles = [...changedStyle, ...changedJSX];
 
         this.db.setIndexMode();
-        const result = await this.scanAndIndex({ jsx: options.jsx }, changedFiles);
+        const result = await this.scanAndIndex({}, changedFiles);
 
         return {
           filesChecked,

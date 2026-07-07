@@ -10,7 +10,7 @@ files will be impacted?"
 
 ## Current state
 
-The data is already in the DB. `cssgraph index --jsx` builds `references` edges
+The data is already in the DB. `cssgraph index` builds `references` edges
 from JSX/TSX `file` nodes to `class_selector` nodes. The existing
 `analyzeRule()` produces `classUsage` and `classToFiles` sets that contain
 exactly the answer.
@@ -101,7 +101,7 @@ Zero new DB queries — `analyzeRule` already produces all the data.
 ## Problem
 
 PostCSS parsing is CPU-bound. On a multi-core machine, a single-threaded
-`cssgraph index --jsx` parses ~9,400 files sequentially, leaving N-1 cores idle.
+`cssgraph index` parses ~9,400 files sequentially, leaving N-1 cores idle.
 
 ## Design (mirrors codegraph's `parse-pool.ts`)
 
@@ -208,8 +208,7 @@ Same pool, same workers, just dispatched in two sequential groups.
 
 | Scenario | Serial | 4 workers | 8 workers |
 |----------|--------|-----------|-----------|
-| production monorepo --jsx (9,400 files) | ~2m30s | ~1m15s | ~50s |
-| production monorepo style-only (1,500) | ~45s | ~25s | ~18s |
+| production monorepo (9,400 files) | ~2m30s | ~1m15s | ~50s |
 
 Diminishing returns beyond 4 workers due to SQLite write serialization
 (still single-threaded) and file I/O bandwidth.

@@ -183,7 +183,7 @@ async sync(options: IndexOptions = {}): Promise<SyncResult> {
   // Phase 3: Rebuild classSelectorMap.
   // ... build map from nodes table ...
 
-  // Phase 4: Re-parse added + modified JSX files (if --jsx).
+  // Phase 4: Re-parse added + modified JSX files.
   // ... same as Phase 2 but for JSX path ...
 
   return { filesChecked: ..., filesAdded: ..., filesModified: ..., filesRemoved: ... };

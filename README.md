@@ -55,13 +55,13 @@ curl -s https://raw.githubusercontent.com/mack-peng/cssgraph/main/docs/guide/ins
 ```bash
 npm i -g cssgraph
 cd your-project
-cssgraph init --jsx
+cssgraph init
 ```
 
 Indexes all style files (CSS, SCSS, Less, Sass) **plus** JSX/TSX className
 references, CSS-in-JS, and CSS Modules — enabling every MCP tool.
 
-Just style files? Skip `--jsx` for ~45s. Add JSX later with `cssgraph index --jsx`.
+JSX scanning is on by default (it's required for `cssgraph_impact`, `cssgraph_callers`, and `cssgraph_rule` to work).
 
 Requires Node.js >= 22.5.0 (for `node:sqlite`).
 
@@ -119,7 +119,7 @@ Auto-sync is enabled by default. The MCP server watches your project and updates
 └───────────────────────────────────────────────────────────┘
 ```
 
-1. **Extraction** — PostCSS parses CSS/SCSS/Less/Sass into ASTs. CSS-in-JS (`styled.div`) and JSX className references extracted from `.jsx`/`.tsx` files with `--jsx`.
+1. **Extraction** — PostCSS parses CSS/SCSS/Less/Sass into ASTs. CSS-in-JS (`styled.div`) and JSX className references extracted from `.jsx`/`.tsx` files.
 2. **Storage** — Everything goes into a local SQLite database (`.cssgraph/cssgraph.db`) with FTS5 full-text search. WAL-mode + batch commits for write performance.
 3. **Graph** — Edges connect related nodes: `contains` (selector→property), `nests` (parent→child selector), `overrides` (higher specificity selector overrides lower), `imports` (file→imported file), `references` (JSX file→className, property→CSS variable).
 4. **Git-first scanning** — `git ls-files` for instant file discovery. Falls back to filesystem walk on non-git projects.
@@ -131,7 +131,7 @@ Auto-sync is enabled by default. The MCP server watches your project and updates
 
 ```bash
 cssgraph init [path]                 # Initialize + build graph
-cssgraph index [path] [--jsx]        # Rebuild from scratch
+cssgraph index [path]                # Rebuild from scratch
 cssgraph query <className>           # Search for className selectors
 cssgraph explore <query...>          # Full style context for a className
 cssgraph details <selector>          # O(1) exact selector → file:line lookup
@@ -150,14 +150,14 @@ cssgraph uninstall                   # Remove from your AI agent
 cssgraph version                     # Print installed version
 ```
 
-### `--jsx` flag
+### JSX Scanning (default)
 
-Opt-in scanning of `.jsx`/`.tsx`/`.js`/`.ts`/`.es6` files for:
+JSX scanning is **always enabled**. cssgraph scans `.jsx`/`.tsx`/`.js`/`.ts`/`.es6` files for:
 - **className references** — `className="btn primary"` → builds `references` edges from component files to className nodes
 - **CSS-in-JS** — `styled.div\`...\`` and `css\`...\`` templates
 - **CSS Modules** — `import styles from './X.module.css'` and dynamic `import()` / `require()`
 
-Without `--jsx`, cssgraph indexes style files only (CSS, SCSS, Less, Sass). This is the fast path — 500 style files in ~45s on a production monorepo. With `--jsx`, 9,400 files total in ~2m30s.
+On a production monorepo, this adds ~9,400 files to the index (~2m30s initial, <4s incremental).
 
 ---
 
@@ -189,8 +189,8 @@ Without `--jsx`, cssgraph indexes style files only (CSS, SCSS, Less, Sass). This
 | Less | `.less` | postcss-less plugin |
 | Sass (indented) | `.sass` | Compile → PostCSS |
 | PostCSS custom | `.pcss` | PostCSS standard |
-| JSX / TSX | `.jsx` `.tsx` | className + CSS-in-JS (`--jsx`) |
-| JavaScript / TypeScript | `.js` `.ts` `.es6` | className + CSS Modules (`--jsx`) |
+| JSX / TSX | `.jsx` `.tsx` | className + CSS-in-JS |
+| JavaScript / TypeScript | `.js` `.ts` `.es6` | className + CSS Modules |
 | CSS Modules | `.module.css` `.module.scss` `.module.less` | Dynamic import resolution |
 | Tailwind | `tailwind.config.js` + CSS `@theme` | v3 JS config + v4 CSS config |
 
@@ -198,10 +198,10 @@ Without `--jsx`, cssgraph indexes style files only (CSS, SCSS, Less, Sass). This
 
 ## Production Scale
 
-| Project | Style files | --jsx total | First index | Nodes | Edges |
-|---------|-----------|-------------|-------------|-------|-------|
-| Small | ~50 | — | ~15s | ~16K | ~50K |
-| Production monorepo | 1,500 | 9,400 | ~2m30s | 450K | 5.3M |
+| Project | Total files | First index | Nodes | Edges |
+|---------|-------------|-------------|-------|-------|
+| Small | ~50 | ~15s | ~16K | ~50K |
+| Production monorepo | 9,400 | ~2m30s | 450K | 5.3M |
 
 ---
 

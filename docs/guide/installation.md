@@ -93,14 +93,14 @@ Restart your agent for the MCP server to load. Once restarted, the agent will se
 
 ```bash
 cd your-project
-cssgraph init --jsx
+cssgraph init
 ```
 
 Indexes all style files **plus** JSX/TSX/JS/TS className references,
 CSS-in-JS, and CSS Modules — one command enables every MCP tool.
 
-Just style files? Skip `--jsx` for a faster ~45s index. You can always
-add JSX references later with `cssgraph index --jsx`.
+JSX scanning is on by default — it's required for `cssgraph_impact`,
+`cssgraph_callers`, and `cssgraph_rule` to work.
 
 ### What gets indexed
 
@@ -114,20 +114,19 @@ add JSX references later with `cssgraph index --jsx`.
 
 By default, `cssgraph` indexes CSS, SCSS, Less, and Sass files. Excluded by default: `node_modules`, `dist`, `build`, `.git`, `.next`, test files (`*.test.*`, `*.stories.*`, `*.spec.*`), `__tests__/`, and `generated/`.
 
-### Indexing with JSX/TSX support
+### Indexing with JSX/TSX support (default)
 
-`cssgraph init --jsx` (recommended) or `cssgraph index --jsx` scans
-`.jsx`, `.tsx`, `.js`, `.ts`, and `.es6` files for className references
-and CSS modules:
+JSX scanning is always enabled. cssgraph scans `.jsx`, `.tsx`, `.js`, `.ts`, and `.es6` files
+for className references and CSS modules:
 
-This enables the `cssgraph_rule` / `cssgraph_callers` tools to report which component files reference each className. Style files are always indexed first so references can be matched.
+This enables the `cssgraph_rule` / `cssgraph_callers` / `cssgraph_impact` tools to report which component files reference each className. Style files are always indexed first so references can be matched.
 
 ### Indexing scale
 
-| Project | Style files | --jsx files | First index | Repeat index |
-|---------|-----------|-------------|-------------|-------------|
-| ~50 style files | 50 | — | ~15s | <1s |
-| Production monorepo | 1,500 | +7,900 | ~2m30s | <4m |
+| Project | Total files | First index | Repeat index |
+|---------|-------------|-------------|-------------|
+| ~50 style files | 50 | ~15s | <1s |
+| Production monorepo | 9,400 | ~2m30s | <4m |
 
 ## Commands & Tools
 
@@ -197,8 +196,7 @@ After upgrading, re-index each project:
 
 ```bash
 cd your-project
-cssgraph index       # style only (fast)
-cssgraph index --jsx # include JSX references (if needed)
+cssgraph index
 ```
 
 ## Uninstall
@@ -221,7 +219,7 @@ cd your-project && rm -rf .cssgraph
 
 **MCP server not connecting** — Make sure the project is initialized (`cssgraph status`) and the path in your MCP config is correct. Try restarting your agent.
 
-**Indexing is slow on a large project** — The initial index scans all files. For JSX scanning (`--jsx`), the first run parses every file; subsequent runs use content-hash skipping for unchanged files. Add custom excludes to `.cssgraph.json` for vendor/theme directories you don't need indexed.
+**Indexing is slow on a large project** — The initial index scans all files including JSX/TSX. The first run parses every file; subsequent runs use content-hash skipping for unchanged files. Add custom excludes to `.cssgraph.json` for vendor/theme directories you don't need indexed.
 
 **Index stalls at "Cleaning existing data"** — This happens on sparse filesystems (e.g. Docker for Mac). The re-init phase deletes the old DB file and creates a fresh one; give it ~5s.
 
