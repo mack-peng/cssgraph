@@ -131,11 +131,21 @@ function extractClassNamesFromExpression(
     for (const sm of stringMatches) {
       for (const cls of splitClassNames(sm[1]!)) add(cls, line);
     }
+    const templateMatches = args.matchAll(/`([^`]*)`/g);
+    for (const sm of templateMatches) {
+      for (const cls of splitClassNames(sm[1]!)) add(cls, line);
+    }
   }
 
   // String literals anywhere in the expression (e.g. condition ? 'foo' : 'bar')
   const stringMatches = expr.matchAll(/["']([^"']+)["']/g);
   for (const m of stringMatches) {
+    for (const cls of splitClassNames(m[1]!)) add(cls, line);
+  }
+
+  // Template literals anywhere in the expression (e.g. `button-and-overlay ${dynamic}`)
+  const templateMatches = expr.matchAll(/`([^`]*)`/g);
+  for (const m of templateMatches) {
     for (const cls of splitClassNames(m[1]!)) add(cls, line);
   }
 }
