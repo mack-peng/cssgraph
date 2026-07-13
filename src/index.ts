@@ -773,7 +773,7 @@ export class CodeGraph {
         const changedFiles = [...changedStyle, ...changedView, ...changedJSX];
 
         this.db.setIndexMode();
-        const result = await this.scanAndIndex({}, changedFiles);
+        const result = await this.scanAndIndex(options, changedFiles);
 
         return {
           filesChecked,

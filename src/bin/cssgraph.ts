@@ -893,7 +893,29 @@ program
     try {
       const { default: CodeGraph } = await import('../index');
       const cg = await CodeGraph.open(projectPath);
-      const result = await cg.sync({});
+
+      let scanTotal = 0;
+      let lastPhase = '';
+
+      const result = await cg.sync({
+        onProgress: (progress) => {
+          if (progress.phase !== lastPhase) {
+            if (lastPhase) progressClear();
+            lastPhase = progress.phase;
+            const label = progress.phase === 'parsing' ? 'Syncing' : progress.phase === 'resolving' ? 'Resolving references' : '';
+            phase(label);
+            if (progress.phase === 'scanning') {
+              scanTotal = progress.total;
+            }
+          }
+          if (progress.phase === 'parsing' && scanTotal > 0) {
+            progressBar(progress.current, progress.total, progress.currentFile || '');
+          }
+        },
+      });
+
+      progressClear();
+      if (lastPhase) phaseComplete();
 
       if (!options.quiet) {
         const total = result.filesAdded + result.filesModified + result.filesRemoved;
