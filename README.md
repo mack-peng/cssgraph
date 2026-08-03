@@ -72,7 +72,10 @@ cssgraph install
 ```
 
 Auto-detects and configures opencode, Claude Code, Cursor, Codex CLI, Gemini CLI,
-Hermes Agent, Antigravity IDE, and Kiro.
+Hermes Agent, Antigravity IDE, and Kiro. Writes MCP server config, instructions
+block, and an **Agent Skill** (`SKILL.md` + `references/pitfalls.md`) that teaches
+agents when to use each of the 12 cssgraph tools, how to chain them into
+workflows, and what pitfalls to avoid.
 
 Or add to any MCP agent manually:
 
