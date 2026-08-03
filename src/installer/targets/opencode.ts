@@ -36,6 +36,8 @@ import {
   jsonDeepEqual,
   removeMarkedSection,
   upsertInstructionsEntry,
+  writeSkill,
+  removeSkill,
 } from './shared';
 import {
   CSSGRAPH_SECTION_END,
@@ -132,16 +134,22 @@ class OpencodeTarget implements AgentTarget {
     return { installed, alreadyConfigured, configPath: file };
   }
 
+  skillDir(loc: Location): string | null {
+    return loc === 'global'
+      ? path.join(os.homedir(), '.agents', 'skills')
+      : path.join(process.cwd(), '.agents', 'skills');
+  }
+
   install(loc: Location, _opts: InstallOptions): WriteResult {
     const files: WriteResult['files'] = [];
     files.push(writeMcpEntry(loc));
 
-    // AGENTS.md gets the short marker-fenced cssgraph block:
-    // subagents and non-MCP harnesses read AGENTS.md but never the MCP
-    // initialize instructions.
     files.push(upsertInstructionsEntry(instructionsPath(loc)));
 
-    // Clean up stale pre-#535 install in %APPDATA%/opencode
+    // Agent Skill: teaches agents how to use cssgraph's 12 tools
+    const sd = this.skillDir(loc);
+    if (sd) files.push(writeSkill(sd));
+
     if (loc === 'global') files.push(...cleanupLegacyWindowsState());
 
     return { files };
@@ -151,6 +159,8 @@ class OpencodeTarget implements AgentTarget {
     const files: WriteResult['files'] = [];
     files.push(removeMcpEntryAt(configPath(loc)));
     files.push(removeInstructionsEntry(loc));
+    const sd = this.skillDir(loc);
+    if (sd) files.push(removeSkill(sd));
     if (loc === 'global') files.push(...cleanupLegacyWindowsState());
     return { files };
   }
@@ -165,7 +175,10 @@ class OpencodeTarget implements AgentTarget {
   }
 
   describePaths(loc: Location): string[] {
-    return [configPath(loc), instructionsPath(loc)];
+    const paths = [configPath(loc), instructionsPath(loc)];
+    const sd = this.skillDir(loc);
+    if (sd) paths.push(path.join(sd, 'cssgraph'));
+    return paths;
   }
 }
 

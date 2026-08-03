@@ -32,6 +32,8 @@ import {
   removeMarkedSection,
   writeJsonFile,
   upsertInstructionsEntry,
+  writeSkill,
+  removeSkill,
 } from './shared';
 import {
   CSSGRAPH_SECTION_END,
@@ -96,6 +98,12 @@ class ClaudeCodeTarget implements AgentTarget {
     return { installed, alreadyConfigured, configPath: mcpPath };
   }
 
+  skillDir(loc: Location): string | null {
+    return loc === 'global'
+      ? path.join(os.homedir(), '.claude', 'skills')
+      : path.join(process.cwd(), '.claude', 'skills');
+  }
+
   install(loc: Location, opts: InstallOptions): WriteResult {
     const files: WriteResult['files'] = [];
 
@@ -127,6 +135,10 @@ class ClaudeCodeTarget implements AgentTarget {
 
     // 3. CLAUDE.md instructions
     files.push(upsertInstructionsEntry(instructionsPath(loc)));
+
+    // 4. Agent Skill
+    const sd = this.skillDir(loc);
+    if (sd) files.push(writeSkill(sd));
 
     return { files };
   }
@@ -189,6 +201,10 @@ class ClaudeCodeTarget implements AgentTarget {
     // 3. Instructions
     files.push(removeInstructionsEntry(loc));
 
+    // 4. Agent Skill
+    const sd = this.skillDir(loc);
+    if (sd) files.push(removeSkill(sd));
+
     return { files };
   }
 
@@ -199,7 +215,10 @@ class ClaudeCodeTarget implements AgentTarget {
   }
 
   describePaths(loc: Location): string[] {
-    return [mcpJsonPath(loc), settingsJsonPath(loc), instructionsPath(loc)];
+    const paths = [mcpJsonPath(loc), settingsJsonPath(loc), instructionsPath(loc)];
+    const sd = this.skillDir(loc);
+    if (sd) paths.push(path.join(sd, 'cssgraph'));
+    return paths;
   }
 }
 

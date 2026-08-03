@@ -26,6 +26,8 @@ import {
   jsonDeepEqual,
   readJsonFile,
   writeJsonFile,
+  writeSkill,
+  removeSkill,
 } from './shared';
 
 function configDir(loc: Location): string {
@@ -70,6 +72,12 @@ class CursorTarget implements AgentTarget {
     return { installed, alreadyConfigured, configPath: file };
   }
 
+  skillDir(loc: Location): string | null {
+    return loc === 'global'
+      ? path.join(os.homedir(), '.agents', 'skills')
+      : path.join(process.cwd(), '.agents', 'skills');
+  }
+
   install(loc: Location, _opts: InstallOptions): WriteResult {
     const files: WriteResult['files'] = [];
     const file = mcpJsonPath(loc);
@@ -81,14 +89,16 @@ class CursorTarget implements AgentTarget {
 
     if (jsonDeepEqual(before, after)) {
       files.push({ path: file, action: 'unchanged' });
-      return { files };
+    } else {
+      if (!config.mcpServers) config.mcpServers = {};
+      config.mcpServers.cssgraph = after;
+      writeJsonFile(file, config);
+      files.push({ path: file, action: existed ? 'updated' : 'created' });
     }
 
-    if (!config.mcpServers) config.mcpServers = {};
-    config.mcpServers.cssgraph = after;
-    writeJsonFile(file, config);
+    const sd = this.skillDir(loc);
+    if (sd) files.push(writeSkill(sd));
 
-    files.push({ path: file, action: existed ? 'updated' : 'created' });
     return { files };
   }
 
@@ -98,21 +108,23 @@ class CursorTarget implements AgentTarget {
 
     if (!fs.existsSync(file)) {
       files.push({ path: file, action: 'not-found' });
-      return { files };
+    } else {
+      const config = readJsonFile(file);
+      if (!config.mcpServers?.cssgraph) {
+        files.push({ path: file, action: 'not-found' });
+      } else {
+        delete config.mcpServers.cssgraph;
+        if (Object.keys(config.mcpServers).length === 0) {
+          delete config.mcpServers;
+        }
+        writeJsonFile(file, config);
+        files.push({ path: file, action: 'removed' });
+      }
     }
 
-    const config = readJsonFile(file);
-    if (!config.mcpServers?.cssgraph) {
-      files.push({ path: file, action: 'not-found' });
-      return { files };
-    }
+    const sd = this.skillDir(loc);
+    if (sd) files.push(removeSkill(sd));
 
-    delete config.mcpServers.cssgraph;
-    if (Object.keys(config.mcpServers).length === 0) {
-      delete config.mcpServers;
-    }
-    writeJsonFile(file, config);
-    files.push({ path: file, action: 'removed' });
     return { files };
   }
 
@@ -127,7 +139,10 @@ class CursorTarget implements AgentTarget {
   }
 
   describePaths(loc: Location): string[] {
-    return [mcpJsonPath(loc)];
+    const paths = [mcpJsonPath(loc)];
+    const sd = this.skillDir(loc);
+    if (sd) paths.push(path.join(sd, 'cssgraph'));
+    return paths;
   }
 }
 

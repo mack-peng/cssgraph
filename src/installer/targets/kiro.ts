@@ -19,6 +19,8 @@ import {
 import {
   atomicWriteFileSync,
   directoryIsCssgraphOnly,
+  writeSkill,
+  removeSkill,
 } from './shared';
 
 function kiroDir(): string { return path.join(os.homedir(), '.kiro'); }
@@ -58,6 +60,10 @@ class KiroTarget implements AgentTarget {
     return { installed, alreadyConfigured, configPath: steeringPathRef() };
   }
 
+  skillDir(_loc: Location): string | null {
+    return path.join(os.homedir(), '.kiro', 'skills');
+  }
+
   install(_loc: Location, _opts: InstallOptions): WriteResult {
     const files: WriteResult['files'] = [];
     const existed = fs.existsSync(steeringPathRef());
@@ -67,40 +73,40 @@ class KiroTarget implements AgentTarget {
       const content = fs.readFileSync(steeringPathRef(), 'utf-8');
       if (content.includes('cssgraph:')) {
         files.push({ path: steeringPathRef(), action: 'unchanged' });
-        return { files };
-      }
-
-      // Append to existing steering file
-      const blockStart = getBlockStart();
-      if (content.includes(blockStart)) {
-        // Extract up to mcp_servers section, append cssgraph entry
-        const lines = content.split('\n');
-        const mcpIdx = lines.findIndex((l) => l.trim() === blockStart);
-        if (mcpIdx !== -1) {
-          const cssgraphLines = [
-            '  cssgraph:',
-            '    type: stdio',
-            '    command: npx',
-            '    args:',
-            '      - cssgraph',
-            '      - serve',
-            '      - --mcp',
-          ];
-          lines.splice(mcpIdx + 1, 0, ...cssgraphLines);
-          atomicWriteFileSync(steeringPathRef(), lines.join('\n') + '\n');
-          files.push({ path: steeringPathRef(), action: 'updated' });
+      } else {
+        const blockStart = getBlockStart();
+        if (content.includes(blockStart)) {
+          const lines = content.split('\n');
+          const mcpIdx = lines.findIndex((l) => l.trim() === blockStart);
+          if (mcpIdx !== -1) {
+            const cssgraphLines = [
+              '  cssgraph:',
+              '    type: stdio',
+              '    command: npx',
+              '    args:',
+              '      - cssgraph',
+              '      - serve',
+              '      - --mcp',
+            ];
+            lines.splice(mcpIdx + 1, 0, ...cssgraphLines);
+            atomicWriteFileSync(steeringPathRef(), lines.join('\n') + '\n');
+            files.push({ path: steeringPathRef(), action: 'updated' });
+          } else {
+            atomicWriteFileSync(steeringPathRef(), content.trimEnd() + '\n\n' + block + '\n');
+            files.push({ path: steeringPathRef(), action: 'updated' });
+          }
         } else {
           atomicWriteFileSync(steeringPathRef(), content.trimEnd() + '\n\n' + block + '\n');
           files.push({ path: steeringPathRef(), action: 'updated' });
         }
-      } else {
-        atomicWriteFileSync(steeringPathRef(), content.trimEnd() + '\n\n' + block + '\n');
-        files.push({ path: steeringPathRef(), action: 'updated' });
       }
     } else {
       atomicWriteFileSync(steeringPathRef(), block + '\n');
       files.push({ path: steeringPathRef(), action: 'created' });
     }
+
+    const sd = this.skillDir(_loc);
+    if (sd) files.push(writeSkill(sd));
 
     return { files };
   }
@@ -110,45 +116,40 @@ class KiroTarget implements AgentTarget {
 
     if (!fs.existsSync(steeringPathRef())) {
       files.push({ path: steeringPathRef(), action: 'not-found' });
-      return { files };
-    }
-
-    const content = fs.readFileSync(steeringPathRef(), 'utf-8');
-    if (!content.includes('cssgraph:')) {
-      files.push({ path: steeringPathRef(), action: 'not-found' });
-      return { files };
-    }
-
-    // Remove the cssgraph sub-block under mcp_servers
-    const lines = content.split('\n');
-    const startIdx = lines.findIndex((l) => /^\s*cssgraph:/.test(l));
-    if (startIdx === -1) {
-      files.push({ path: steeringPathRef(), action: 'not-found' });
-      return { files };
-    }
-
-    // Find where the cssgraph block ends (same or lesser indentation)
-    const startLineMatch = lines[startIdx]!.match(/^(\s*)/);
-    const indent = startLineMatch?.[1]?.length ?? 0;
-    let endIdx = startIdx + 1;
-    while (endIdx < lines.length) {
-      const currentLine = lines[endIdx]!;
-      if (currentLine.trim() === '') {
-        endIdx++;
-        continue;
+    } else {
+      const content = fs.readFileSync(steeringPathRef(), 'utf-8');
+      if (!content.includes('cssgraph:')) {
+        files.push({ path: steeringPathRef(), action: 'not-found' });
+      } else {
+        const lines = content.split('\n');
+        const startIdx = lines.findIndex((l) => /^\s*cssgraph:/.test(l));
+        if (startIdx === -1) {
+          files.push({ path: steeringPathRef(), action: 'not-found' });
+        } else {
+          const startLineMatch = lines[startIdx]!.match(/^(\s*)/);
+          const indent = startLineMatch?.[1]?.length ?? 0;
+          let endIdx = startIdx + 1;
+          while (endIdx < lines.length) {
+            const currentLine = lines[endIdx]!;
+            if (currentLine.trim() === '') {
+              endIdx++;
+              continue;
+            }
+            const lineMatch = currentLine.match(/^(\s*)/);
+            const lineIndent = lineMatch?.[1]?.length ?? 0;
+            if (lineIndent <= indent) break;
+            endIdx++;
+          }
+          while (endIdx < lines.length && lines[endIdx]?.trim() === '') endIdx++;
+          lines.splice(startIdx, endIdx - startIdx);
+          atomicWriteFileSync(steeringPathRef(), lines.join('\n').trim() + '\n');
+          files.push({ path: steeringPathRef(), action: 'removed' });
+        }
       }
-      const lineMatch = currentLine.match(/^(\s*)/);
-      const lineIndent = lineMatch?.[1]?.length ?? 0;
-      if (lineIndent <= indent) break;
-      endIdx++;
     }
 
-    // Remove empty lines trailing the block
-    while (endIdx < lines.length && lines[endIdx]?.trim() === '') endIdx++;
-
-    lines.splice(startIdx, endIdx - startIdx);
-    atomicWriteFileSync(steeringPathRef(), lines.join('\n').trim() + '\n');
-    files.push({ path: steeringPathRef(), action: 'removed' });
+    const sd = this.skillDir(_loc);
+    if (sd) files.push(removeSkill(sd));
 
     return { files };
   }
@@ -159,7 +160,10 @@ class KiroTarget implements AgentTarget {
   }
 
   describePaths(_loc: Location): string[] {
-    return [steeringPathRef()];
+    const paths = [steeringPathRef()];
+    const sd = this.skillDir(_loc);
+    if (sd) paths.push(path.join(sd, 'cssgraph'));
+    return paths;
   }
 }
 

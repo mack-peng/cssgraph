@@ -24,6 +24,8 @@ import {
   writeJsonFile,
   upsertInstructionsEntry,
   removeMarkedSection,
+  writeSkill,
+  removeSkill,
 } from './shared';
 import {
   CSSGRAPH_SECTION_END,
@@ -53,6 +55,10 @@ class HermesTarget implements AgentTarget {
     return { installed, alreadyConfigured, configPath: mcpPath() };
   }
 
+  skillDir(_loc: Location): string | null {
+    return path.join(os.homedir(), '.hermes', 'skills');
+  }
+
   install(_loc: Location, _opts: InstallOptions): WriteResult {
     const files: WriteResult['files'] = [];
     const mp = mcpPath();
@@ -72,6 +78,9 @@ class HermesTarget implements AgentTarget {
     }
 
     files.push(upsertInstructionsEntry(agentsPath()));
+
+    const sd = this.skillDir(_loc);
+    if (sd) files.push(writeSkill(sd));
 
     return { files };
   }
@@ -99,6 +108,9 @@ class HermesTarget implements AgentTarget {
     const instructionAction = removeMarkedSection(agentsPath(), CSSGRAPH_SECTION_START, CSSGRAPH_SECTION_END);
     files.push({ path: agentsPath(), action: instructionAction });
 
+    const sd = this.skillDir(_loc);
+    if (sd) files.push(removeSkill(sd));
+
     return { files };
   }
 
@@ -108,7 +120,10 @@ class HermesTarget implements AgentTarget {
   }
 
   describePaths(_loc: Location): string[] {
-    return [mcpPath(), agentsPath()];
+    const paths = [mcpPath(), agentsPath()];
+    const sd = this.skillDir(_loc);
+    if (sd) paths.push(path.join(sd, 'cssgraph'));
+    return paths;
   }
 }
 

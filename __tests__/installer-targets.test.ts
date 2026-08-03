@@ -137,7 +137,7 @@ describe('claude target', () => {
     const home = makeTempRoot();
     mockHomedir(home);
     const paths = claudeTarget.describePaths('global');
-    expect(paths.length).toBe(3);
+    expect(paths.length).toBe(4); // +1 for skill dir
   });
 });
 
@@ -198,7 +198,7 @@ describe('opencode target', () => {
     const home = makeTempRoot();
     mockHomedir(home);
     const paths = opencodeTarget.describePaths('global');
-    expect(paths.length).toBe(2);
+    expect(paths.length).toBe(3); // +1 for skill dir
   });
 });
 

@@ -23,6 +23,8 @@ import {
   directoryIsCssgraphOnly,
   upsertInstructionsEntry,
   removeMarkedSection,
+  writeSkill,
+  removeSkill,
 } from './shared';
 import {
   buildTomlTable,
@@ -67,6 +69,10 @@ class CodexTarget implements AgentTarget {
     return { installed, alreadyConfigured, configPath: configPathRef() };
   }
 
+  skillDir(_loc: Location): string | null {
+    return path.join(os.homedir(), '.codex', 'skills');
+  }
+
   install(_loc: Location, _opts: InstallOptions): WriteResult {
     const files: WriteResult['files'] = [];
     const cfgPath = configPathRef();
@@ -87,6 +93,9 @@ class CodexTarget implements AgentTarget {
     });
 
     files.push(upsertInstructionsEntry(agentsPathRef()));
+
+    const sd = this.skillDir(_loc);
+    if (sd) files.push(writeSkill(sd));
 
     return { files };
   }
@@ -111,6 +120,9 @@ class CodexTarget implements AgentTarget {
     const instructionAction = removeMarkedSection(agentsPathRef(), CSSGRAPH_SECTION_START, CSSGRAPH_SECTION_END);
     files.push({ path: agentsPathRef(), action: instructionAction });
 
+    const sd = this.skillDir(_loc);
+    if (sd) files.push(removeSkill(sd));
+
     return { files };
   }
 
@@ -120,7 +132,10 @@ class CodexTarget implements AgentTarget {
   }
 
   describePaths(_loc: Location): string[] {
-    return [configPathRef(), agentsPathRef()];
+    const paths = [configPathRef(), agentsPathRef()];
+    const sd = this.skillDir(_loc);
+    if (sd) paths.push(path.join(sd, 'cssgraph'));
+    return paths;
   }
 }
 

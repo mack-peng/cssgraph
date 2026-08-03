@@ -15,6 +15,10 @@ import {
   CSSGRAPH_SECTION_START,
   CSSGRAPH_SECTION_END,
 } from '../instructions-template';
+import {
+  buildSkillMd,
+  buildPitfallsMd,
+} from '../skill-template';
 
 /**
  * The MCP-server config block cssgraph injects. Same shape across
@@ -252,4 +256,93 @@ export function removeMarkedSection(
     atomicWriteFileSync(filePath, joined.trim() + '\n');
   }
   return 'removed';
+}
+
+// ─── Agent Skill helpers ───────────────────────────────────────────
+
+const SKILL_NAME = 'cssgraph';
+
+/**
+ * Write the cssgraph Agent Skill into a target directory.
+ *
+ * Creates: <dir>/cssgraph/SKILL.md and <dir>/cssgraph/references/pitfalls.md.
+ * Idempotent: if both files already exist with the exact content we would
+ * write, returns `unchanged` so the install log doesn't show a spurious
+ * "updated" on every re-run.
+ *
+ * Each target calls this with its own skillDir — different agents
+ * discover skills in different paths (`.agents/skills/`, `.claude/skills/`,
+ * `.codex/skills/`, etc.), so no shared cache or symlink.
+ */
+export function writeSkill(skillDir: string): { path: string; action: 'created' | 'updated' | 'unchanged' } {
+  const skillRoot = path.join(skillDir, SKILL_NAME);
+  const skillMdPath = path.join(skillRoot, 'SKILL.md');
+  const refsDir = path.join(skillRoot, 'references');
+  const pitfallsPath = path.join(refsDir, 'pitfalls.md');
+
+  const skillMdContent = buildSkillMd();
+  const pitfallsContent = buildPitfallsMd();
+
+  const existingSkill = safeRead(skillMdPath);
+  const existingPitfalls = safeRead(pitfallsPath);
+
+  if (existingSkill === skillMdContent && existingPitfalls === pitfallsContent) {
+    return { path: skillRoot, action: 'unchanged' };
+  }
+
+  const existed = fs.existsSync(skillMdPath);
+
+  if (!fs.existsSync(refsDir)) {
+    fs.mkdirSync(refsDir, { recursive: true });
+  }
+
+  atomicWriteFileSync(skillMdPath, skillMdContent);
+  atomicWriteFileSync(pitfallsPath, pitfallsContent);
+
+  return { path: skillRoot, action: existed ? 'updated' : 'created' };
+}
+
+/**
+ * Remove the cssgraph Agent Skill directory.
+ *
+ * Deletes <skillDir>/cssgraph/ recursively. Returns `removed` when a
+ * cssgraph SKILL.md was found and deleted; `not-found` when there was
+ * nothing to remove; `kept` when the skillRoot didn't exist.
+ */
+export function removeSkill(skillDir: string): { path: string; action: 'removed' | 'not-found' | 'kept' } {
+  const skillRoot = path.join(skillDir, SKILL_NAME);
+  const skillMdPath = path.join(skillRoot, 'SKILL.md');
+
+  if (!fs.existsSync(skillMdPath)) {
+    return { path: skillRoot, action: 'kept' };
+  }
+
+  function rmRf(dir: string) {
+    if (!fs.existsSync(dir)) return;
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        rmRf(full);
+      } else {
+        try { fs.unlinkSync(full); } catch { /* ignore */ }
+      }
+    }
+    try { fs.rmdirSync(dir); } catch { /* ignore */ }
+  }
+
+  rmRf(skillRoot);
+
+  // Verify removal
+  if (!fs.existsSync(skillMdPath)) {
+    return { path: skillRoot, action: 'removed' };
+  }
+  return { path: skillRoot, action: 'not-found' };
+}
+
+function safeRead(filePath: string): string | null {
+  try {
+    return fs.readFileSync(filePath, 'utf-8');
+  } catch {
+    return null;
+  }
 }

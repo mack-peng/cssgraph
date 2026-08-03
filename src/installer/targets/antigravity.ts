@@ -22,6 +22,8 @@ import {
   directoryIsCssgraphOnly,
   readJsonFile,
   writeJsonFile,
+  writeSkill,
+  removeSkill,
 } from './shared';
 
 function antigravityDir(): string { return path.join(os.homedir(), '.kiro'); }
@@ -47,6 +49,10 @@ class AntigravityTarget implements AgentTarget {
     return { installed, alreadyConfigured, configPath: mcpPath() };
   }
 
+  skillDir(_loc: Location): string | null {
+    return path.join(os.homedir(), '.kiro', 'skills');
+  }
+
   install(_loc: Location, _opts: InstallOptions): WriteResult {
     const files: WriteResult['files'] = [];
     const mp = mcpPath();
@@ -65,6 +71,9 @@ class AntigravityTarget implements AgentTarget {
       files.push({ path: mp, action: 'unchanged' });
     }
 
+    const sd = this.skillDir(_loc);
+    if (sd) files.push(writeSkill(sd));
+
     return { files };
   }
 
@@ -79,14 +88,17 @@ class AntigravityTarget implements AgentTarget {
         if (Object.keys(config.mcpServers).length === 0) {
           delete config.mcpServers;
         }
-        writeJsonFile(mp, config);
-        files.push({ path: mp, action: 'removed' });
+    writeJsonFile(mp, config);
+    files.push({ path: mp, action: 'removed' });
       } else {
         files.push({ path: mp, action: 'not-found' });
       }
     } else {
       files.push({ path: mp, action: 'not-found' });
     }
+
+    const sd = this.skillDir(_loc);
+    if (sd) files.push(removeSkill(sd));
 
     return { files };
   }
@@ -97,7 +109,10 @@ class AntigravityTarget implements AgentTarget {
   }
 
   describePaths(_loc: Location): string[] {
-    return [mcpPath()];
+    const paths = [mcpPath()];
+    const sd = this.skillDir(_loc);
+    if (sd) paths.push(path.join(sd, 'cssgraph'));
+    return paths;
   }
 }
 

@@ -43,4 +43,18 @@ export interface AgentTarget {
   printConfig(loc: Location): string;
   /** Filesystem paths this target would write to at this location. */
   describePaths(loc: Location): string[];
+  /**
+   * The agent-specific directory where Agent Skills (SKILL.md) should
+   * be installed. Returns null when the target has no skill concept.
+   *
+   * Each agent discovers skills in its own convention path:
+   * - opencode: `.agents/skills/` (cross-agent standard)
+   * - claude:   `.claude/skills/`
+   * - codex:    `~/.codex/skills/`
+   * - cursor:   `.agents/skills/` (cross-agent standard)
+   * - hermes:   `~/.hermes/skills/`
+   * - gemini:   `~/.gemini/skills/`
+   * - antigravity / kiro: `~/.kiro/skills/`
+   */
+  skillDir(loc: Location): string | null;
 }

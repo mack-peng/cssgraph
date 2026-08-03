@@ -24,6 +24,8 @@ import {
   writeJsonFile,
   upsertInstructionsEntry,
   removeMarkedSection,
+  writeSkill,
+  removeSkill,
 } from './shared';
 import {
   CSSGRAPH_SECTION_END,
@@ -54,6 +56,10 @@ class GeminiTarget implements AgentTarget {
     return { installed, alreadyConfigured, configPath: mcpPathRef() };
   }
 
+  skillDir(_loc: Location): string | null {
+    return path.join(os.homedir(), '.gemini', 'skills');
+  }
+
   install(_loc: Location, _opts: InstallOptions): WriteResult {
     const files: WriteResult['files'] = [];
     const mcpPath = mcpPathRef();
@@ -73,6 +79,9 @@ class GeminiTarget implements AgentTarget {
     }
 
     files.push(upsertInstructionsEntry(instructionsPathRef()));
+
+    const sd = this.skillDir(_loc);
+    if (sd) files.push(writeSkill(sd));
 
     return { files };
   }
@@ -100,6 +109,9 @@ class GeminiTarget implements AgentTarget {
     const instructionAction = removeMarkedSection(instructionsPathRef(), CSSGRAPH_SECTION_START, CSSGRAPH_SECTION_END);
     files.push({ path: instructionsPathRef(), action: instructionAction });
 
+    const sd = this.skillDir(_loc);
+    if (sd) files.push(removeSkill(sd));
+
     return { files };
   }
 
@@ -109,7 +121,10 @@ class GeminiTarget implements AgentTarget {
   }
 
   describePaths(_loc: Location): string[] {
-    return [mcpPathRef(), instructionsPathRef()];
+    const paths = [mcpPathRef(), instructionsPathRef()];
+    const sd = this.skillDir(_loc);
+    if (sd) paths.push(path.join(sd, 'cssgraph'));
+    return paths;
   }
 }
 
