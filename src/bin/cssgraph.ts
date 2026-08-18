@@ -1057,6 +1057,27 @@ program
   });
 
 /**
+ * cssgraph install-skills
+ */
+program
+  .command('install-skills')
+  .description('Update SKILL.md only (no MCP config changes)')
+  .option('--target <ids>', 'Agent targets (auto, all, or csv: claude,opencode)')
+  .option('--location <loc>', 'Config location (global, local)', 'global')
+  .action(async (options: { target?: string; location?: string }) => {
+    try {
+      const { runInstallSkills } = await import('../installer');
+      await runInstallSkills({
+        target: options.target,
+        location: options.location,
+      });
+    } catch (err) {
+      console.error(`Skill update failed: ${err instanceof Error ? err.message : String(err)}`);
+      process.exit(1);
+    }
+  });
+
+/**
  * cssgraph uninstall
  */
 program

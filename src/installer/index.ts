@@ -22,6 +22,7 @@ import {
   getTarget,
   resolveTargetFlag,
 } from './targets/registry';
+import { writeSkill } from './targets/shared';
 import type { AgentTarget, Location, TargetId } from './targets/types';
 
 // Dynamic import helper — tsc compiles import() to require() in CJS mode,
@@ -212,6 +213,41 @@ export async function runInstallerWithOptions(opts: RunInstallerOptions): Promis
     ? `Done! Restart your agent${targets.length > 1 ? 's' : ''} to use cssgraph.`
     : 'Done!';
   clack.outro(finalNote);
+}
+
+/**
+ * Lightweight skill-only installer: writes SKILL.md + pitfalls.md to each
+ * agent's skill directory, without touching MCP config or instructions.
+ * Use this to update skills after a cssgraph version bump.
+ */
+export async function runInstallSkills(opts: { target?: string; location?: string }): Promise<void> {
+  const clack = await importESM('@clack/prompts');
+  clack.intro(`cssgraph v${getVersion()} — update skills`);
+
+  const location: Location = (opts.location as Location) ?? 'global';
+  const targets = opts.target
+    ? resolveTargetFlag(opts.target, location)
+    : detectAll(location)
+        .filter(({ detection }) => detection.installed)
+        .map(({ target }) => target);
+
+  if (targets.length === 0) {
+    clack.outro('No agent targets detected — nothing to do.');
+    return;
+  }
+
+  for (const target of targets) {
+    const sd = target.skillDir(location);
+    if (!sd) {
+      clack.log.info(`${target.displayName}: no skill directory — skipped`);
+      continue;
+    }
+    const result = writeSkill(sd);
+    const verb = result.action === 'unchanged' ? 'Unchanged' : result.action === 'created' ? 'Created' : 'Updated';
+    clack.log.success(`${target.displayName}: ${verb} ${tildify(result.path)}`);
+  }
+
+  clack.outro('Done! Restart your agents to pick up skill changes.');
 }
 
 export interface RunUninstallerOptions {

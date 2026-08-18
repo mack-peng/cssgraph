@@ -151,6 +151,7 @@ cssgraph status [path]                     # Index statistics
 cssgraph sync [path]                       # Incremental update
 cssgraph serve --mcp                       # Start MCP server
 cssgraph install                           # Auto-wire to your AI agent
+cssgraph install-skills                    # Update SKILL.md only (no MCP config changes)
 cssgraph uninstall                         # Remove from your AI agent
 cssgraph version                           # Print installed version
 ```
