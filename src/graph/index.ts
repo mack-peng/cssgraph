@@ -397,10 +397,24 @@ export class GraphQueryManager {
 
   private diagnoseLevel(classes: string[], label: string): AnchorLevel {
     const matched: Array<{ node: Node; props: Array<{ property: string; value: string }> }> = [];
-    for (const cls of classes) {
-      const nodes = this.queries.getClassSelectorsByName(cls);
-      for (const node of nodes) {
+
+    // When multiple classes are provided, use containment search first
+    // (finds selectors that contain ALL classes — e.g. ".site-version-history-dialog-wrapper .s-kit-modal")
+    // Falls back to per-class name search if no containment results
+    if (classes.length > 1) {
+      const contained = this.queries.getClassSelectorsContainingClasses(classes);
+      for (const node of contained) {
         matched.push({ node, props: node.properties ?? this.getPropertiesForNode(node.id) });
+      }
+    }
+
+    // Fallback: per-class name search (broader — matches any rule containing the class)
+    if (matched.length === 0) {
+      for (const cls of classes) {
+        const nodes = this.queries.getClassSelectorsByName(cls);
+        for (const node of nodes) {
+          matched.push({ node, props: node.properties ?? this.getPropertiesForNode(node.id) });
+        }
       }
     }
 
