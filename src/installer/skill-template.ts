@@ -74,6 +74,7 @@ context snippets.
 | "Where exactly is \`.btn-primary\` defined?" | **cssgraph_details** — O(1) exact match. No results? Fall back to **cssgraph_search** |
 | "Is there a class named something like btn-*?" | **cssgraph_search** — fuzzy name search |
 | "Which code files use ALL classes in \`.foo.bar\`?" | **cssgraph_impact_selector** — strict (all classes) and loose (any class) impact |
+| "Why doesn't this scroll container scroll?" | **cssgraph_diagnose** — static shape diagnosis: classifies height/width declarations as DEFINITE/INDEFINITE/UNVERIFIABLE along the ancestor chain, detects layout patterns |
 | "What style files exist in this project?" | **cssgraph_files** |
 | "Is the index healthy and up to date?" | **cssgraph_status** |
 
@@ -85,6 +86,7 @@ When cssgraph MCP tools are unavailable, use the CLI:
 cssgraph explore "<class-name>"    # same output as cssgraph_explore
 cssgraph rule ".a .b"              # same as cssgraph_rule
 cssgraph details ".btn"            # same as cssgraph_details
+cssgraph diagnose ".target" ".a .b" ".a .c"  # static shape diagnosis
 cssgraph status                    # same as cssgraph_status
 \`\`\`
 
@@ -124,6 +126,26 @@ cssgraph_explore(query=".btn-primary")
 ⚠️ **The unused tool can produce false positives.** A class may be used in
 HTML/ERB/Haml templates, dynamically generated, or referenced by unindexed
 files. Always verify with explore before deleting.
+
+### 4. CSS layout debugging (scroll/height issues)
+
+When a scroll container doesn't scroll, a dialog collapses to 0px, or
+height:100% doesn't work as expected:
+
+\`\`\`
+1. Run dom-report.js (browser-agent scripts/dom-report.js) to get runtime shape
+2. Pass the ancestor chain to cssgraph_diagnose for static analysis:
+   cssgraph_diagnose(className=".version-history",
+     chain=[".wrapper .modal", ".wrapper .modal-body", ".wrapper .version-history"])
+3. Compare: dom-report.js = runtime truth, cssgraph_diagnose = static rules
+\`\`\`
+
+**Key:** Pass full descendant selectors (e.g. \`.wrapper .modal\`) for precise
+matching — avoids false matches from unrelated dialogs. When dom-report.js and
+cssgraph conflict, trust dom-report.js (runtime truth).
+
+⚠️ **Static limitation:** cssgraph_diagnose cannot know the real DOM structure
+or runtime resolution. UNVERIFIABLE levels require dom-report.js verification.
 
 ## Cross-tool Patterns
 
@@ -251,6 +273,23 @@ tool. Read it when a result seems surprising or incomplete.
 - **CSS Module resolution:** Hashed names are resolved before matching.
 - **Properties from node JSON or contains edges:** Prefers embedded JSON,
   falls back to edge traversal.
+
+## cssgraph_diagnose
+
+- **Static analysis only:** Cannot know the real DOM structure, computed values,
+  or runtime resolution. UNVERIFIABLE levels require dom-report.js verification.
+- **Multi-class precise matching:** When chain labels contain multiple classes
+  (e.g. \`.wrapper .modal\`), uses containment search to find rules with ALL
+  classes. Falls back to per-class name search if no containment results.
+- **Single-class broad matching:** A label like \`.s-kit-modal\` matches ALL
+  rules containing that class — may include unrelated dialogs. Use full
+  descendant selectors for precision.
+- **No DOM context:** Doesn't know which rules actually apply to a specific
+  DOM element. A rule like \`.s-kit-modal { height: 36px }\` from crm.less
+  may match even if the target element uses a different \`.s-kit-modal\` rule.
+- **Height/width only:** Currently analyzes height, width, max-height,
+  max-width, display, position, overflow, flex, containing block. Does not
+  analyze margin, padding, grid, or other layout properties.
 
 ## cssgraph_search
 
