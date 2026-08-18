@@ -55,8 +55,8 @@ files       → PostCSS / CSS-in-JS / JSX extractors / template extractor
 - `src/graph/` — `GraphTraverser` (BFS/DFS, impact radius, path finding) and `GraphQueryManager` (high-level queries: `analyzeRule`, `getCascade`, `getSelectorDetails`).
 - `src/context/` — `ContextBuilder` for markdown output.
 - `src/sync/` — `FileWatcher` (native FS events) with debounce + filter.
-- `src/mcp/` — MCP server with 12 tools (see below). Server instructions in `src/mcp/server-instructions.ts`.
-- `src/installer/` — Per-agent installer targets (opencode, claude, codex, cursor, gemini, hermes, antigravity, kiro). Writes MCP config, instructions block, and Agent Skill (SKILL.md). Skill templates in `skill-template.ts` encode the 12-tool decision tree, 3 core workflows, and per-tool pitfalls.
+- `src/mcp/` — MCP server with 13 tools (see below). Server instructions in `src/mcp/server-instructions.ts`.
+- `src/installer/` — Per-agent installer targets (opencode, claude, codex, cursor, gemini, hermes, antigravity, kiro). Writes MCP config, instructions block, and Agent Skill (SKILL.md). Skill templates in `skill-template.ts` encode the 13-tool decision tree, 3 core workflows, and per-tool pitfalls.
 - `src/bin/cssgraph.ts` — CLI (commander). Subcommands: `init`, `index`, `query`, `explore`, `impact`, `impact-selector`, `rule`, `details`, `unused`, `cascade`, `property`, `files`, `status`, `sync`, `serve --mcp`, `install`, `uninstall`.
 - `src/config.ts` — mtime-cached `.cssgraph.json` project config loader.
 
@@ -94,6 +94,7 @@ files       → PostCSS / CSS-in-JS / JSX extractors / template extractor
 | `cssgraph_details` | Quick O(1) exact selector lookup (no edges query) |
 | `cssgraph_unused` | Find class selectors with no incoming references |
 | `cssgraph_cascade` | Visualize the cascade path for a className |
+| `cssgraph_diagnose` | Static anchor diagnosis for scroll/height issues — DEFINITE/INDEFINITE/UNVERIFIABLE classification + red flags |
 | `cssgraph_property` | Search selectors by CSS property value |
 | `cssgraph_files` | Indexed style file tree |
 | `cssgraph_status` | Index health check |

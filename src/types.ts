@@ -193,6 +193,43 @@ export interface CascadeResult {
   steps: CascadeStep[];
 }
 
+// Static anchor diagnosis: classify height declarations level by level along the DOM ancestor chain (supplied by the caller)
+export type AnchorConfidence = 'DEFINITE' | 'INDEFINITE' | 'UNVERIFIABLE';
+
+export interface AnchorLevel {
+  /** Chain level label, e.g. 'div.s-kit-modal' or '.s-kit-modal' */
+  label: string;
+  /** Matching rule selectors (may be multiple; highest-specificity effective) */
+  selectors: string[];
+  /** Declared height value (raw string), null when not declared */
+  declaredHeight: string | null;
+  /** Declared max-height value (raw string), null when not declared */
+  declaredMaxHeight: string | null;
+  /** Confidence classification of the height declaration */
+  confidence: AnchorConfidence;
+  /** Whether this level's declaration gives % children a definite height (DEFINITE absolute units only) */
+  providesAnchor: boolean;
+  /** Compensation red flags: overflow-y:auto/scroll + large margin patterns that reserve scroll space */
+  redFlags: string[];
+  /** Rule locations as filePath:startLine */
+  locations: string[];
+}
+
+export interface DiagnoseResult {
+  /** Diagnostic target className (scroll container or dialog root) */
+  target: string;
+  /** Per-level diagnosis along the chain */
+  levels: AnchorLevel[];
+  /** Whether the chain contains a definite anchor */
+  anchored: boolean;
+  /** Label of the level holding the anchor, null when none */
+  anchorLevel: string | null;
+  /** Verdict summary */
+  verdict: string;
+  /** Fix recommendations */
+  recommendations: string[];
+}
+
 export interface UnusedResult {
   node: Node;
   referencedBy: number;

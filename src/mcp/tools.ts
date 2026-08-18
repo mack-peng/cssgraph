@@ -129,6 +129,19 @@ export function getToolDefinitions() {
       },
     },
     {
+      name: 'cssgraph_diagnose',
+      description: 'Static anchor diagnosis for scroll/height issues. Walks the DOM ancestor chain and classifies each level\'s height declaration as DEFINITE (absolute unit, usable as anchor), INDEFINITE (%), or UNVERIFIABLE (auto/none). Detects compensation red flags (overflow + large margin, fixed + %, max-height only). Static analysis cannot prove runtime resolution — UNVERIFIABLE levels require DOM Reality Report verification. Pass chain from DOM Reality Report ancestor labels (e.g. ["div.editor-root", "div.s-kit-modal", ...]).',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          className: { type: 'string' as const, description: 'Target class name (scroll container or dialog root)' },
+          chain: { type: 'array' as const, items: { type: 'string' as const }, description: 'Ancestor chain labels root→up (optional, defaults to [className]). Get from DOM Reality Report.' },
+          projectPath: { type: 'string' as const, description: 'Path to project with .cssgraph/ initialized (optional)' },
+        },
+        required: ['className'],
+      },
+    },
+    {
       name: 'cssgraph_property',
       description: 'Search selectors by CSS property value (e.g. property="display", value="flex").',
       inputSchema: {
@@ -389,6 +402,37 @@ export class MCPServer {
           lines.push(`   ${s.properties.map(p => `${p.property}: ${p.value}`).join('; ')}`);
         }
       }
+      return lines.join('\n');
+    } finally {
+      cg.destroy();
+    }
+  }
+
+  async diagnose(args: Record<string, unknown>): Promise<string> {
+    const className = (args['className'] as string || '').replace(/^\./, '');
+    if (!className) return 'className is required.';
+    const chain = (args['chain'] as string[] | undefined)?.length
+      ? (args['chain'] as string[])
+      : [className];
+    const root = await this.getProjectPath(args);
+    if (!root) return this.notInitialized();
+    const { default: CodeGraph } = await import('../index');
+    const cg = await CodeGraph.open(root);
+    try {
+      const result = cg.diagnoseHeightAnchor(className, chain);
+      const lines: string[] = [`Anchor diagnosis for "${className}" — ${result.verdict}\n`];
+      for (const lv of result.levels) {
+        const src = lv.selectors.length ? lv.selectors.join(', ') : '(no rule matched)';
+        const loc = lv.locations.length ? ` @ ${lv.locations.join(', ')}` : '';
+        lines.push(`[${lv.confidence}] ${lv.label}: height=${lv.declaredHeight ?? '—'} maxHeight=${lv.declaredMaxHeight ?? '—'} (${src}${loc})`);
+        for (const f of lv.redFlags) lines.push(`    ⚠ ${f}`);
+      }
+      if (result.anchorLevel) {
+        lines.push(`\nAnchor: ${result.anchorLevel}`);
+      } else {
+        lines.push('\nAnchor: none');
+      }
+      for (const r of result.recommendations) lines.push(`Recommendation: ${r}`);
       return lines.join('\n');
     } finally {
       cg.destroy();

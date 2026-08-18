@@ -37,6 +37,7 @@
 - [x] `cssgraph rule <selector>` — selector 级精确/关联匹配 + loose/strict 影响面
 - [x] `cssgraph details <selector>` — O(1) 精确 selector 查找（轻量，不查 edges）
 - [x] `cssgraph impact-selector <selector>` — 查 selector 影响的代码文件（JS/TS/JSX/TSX/es6）
+- [x] `cssgraph diagnose <className> [chain...]` — 静态锚点诊断（height 声明 DEFINITE/INDEFINITE/UNVERIFIABLE 分类 + 补偿红旗）
 
 ## 性能优化
 

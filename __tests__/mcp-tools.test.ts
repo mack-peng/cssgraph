@@ -267,9 +267,9 @@ describe('MCP tools', () => {
     }
   });
 
-  it('getToolDefinitions returns 12 tools with projectPath', () => {
+  it('getToolDefinitions returns 13 tools with projectPath', () => {
     const tools = getToolDefinitions();
-    expect(tools.length).toBe(12);
+    expect(tools.length).toBe(13);
     expect(tools[0]!.name).toBe('cssgraph_explore');
     for (const tool of tools) {
       expect(tool.inputSchema.properties).toHaveProperty('projectPath');

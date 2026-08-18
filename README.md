@@ -74,7 +74,7 @@ cssgraph install
 Auto-detects and configures opencode, Claude Code, Cursor, Codex CLI, Gemini CLI,
 Hermes Agent, Antigravity IDE, and Kiro. Writes MCP server config, instructions
 block, and an **Agent Skill** (`SKILL.md` + `references/pitfalls.md`) that teaches
-agents when to use each of the 12 cssgraph tools, how to chain them into
+agents when to use each of the 13 cssgraph tools, how to chain them into
 workflows, and what pitfalls to avoid.
 
 Or add to any MCP agent manually:
@@ -144,6 +144,7 @@ cssgraph impact-selector <selector>       # Code files affected by a selector
 cssgraph impact <className>                # Blast radius of changing a className
 cssgraph unused                            # Find unreferenced class selectors
 cssgraph cascade <className>               # Visualize cascade path
+cssgraph diagnose <className> [chain...]   # Static anchor diagnosis (height/scroll)
 cssgraph property <query...>               # Search by CSS property value
 cssgraph files [path]                      # Project style file tree
 cssgraph status [path]                     # Index statistics
@@ -182,6 +183,7 @@ This enables `cssgraph_impact`, `cssgraph_callers`, and `cssgraph_rule` to track
 | `cssgraph_details` | O(1) exact selector lookup (no edges, lightweight) |
 | `cssgraph_unused` | Find class selectors with no incoming references |
 | `cssgraph_cascade` | Visualize the cascade path for a className |
+| `cssgraph_diagnose` | Static anchor diagnosis for scroll/height issues — classifies height declarations as DEFINITE / INDEFINITE / UNVERIFIABLE along the ancestor chain |
 | `cssgraph_property` | Search selectors by CSS property value |
 | `cssgraph_files` | Indexed style file tree |
 | `cssgraph_status` | Index health check |

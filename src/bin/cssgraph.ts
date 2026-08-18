@@ -531,6 +531,53 @@ program
     });
 
   /**
+   * cssgraph diagnose <className> [chain...]
+   */
+  program
+    .command('diagnose <className> [chain...]')
+    .description('Static anchor diagnosis: classify height declarations along the DOM ancestor chain')
+    .option('-p, --path <path>', 'Project path')
+    .option('-j, --json', 'Output as JSON')
+    .action(async (className: string, chain: string[], options: { path?: string; json?: boolean }) => {
+      const projectPath = resolveProjectPath(options.path);
+
+      if (!isInitialized(projectPath)) {
+        console.error(`Not initialized in ${projectPath}. Run "cssgraph init" first.`);
+        process.exit(1);
+      }
+
+      try {
+        const { default: CodeGraph } = await import('../index');
+        const cg = await CodeGraph.open(projectPath);
+        const effectiveChain = chain.length > 0 ? chain : [className];
+        const result = cg.diagnoseHeightAnchor(className, effectiveChain);
+
+        if (options.json) {
+          console.log(JSON.stringify(result, null, 2));
+        } else {
+          console.log(`\n${bold('Anchor diagnosis')} for "${className}" — ${result.verdict}\n`);
+          for (const lv of result.levels) {
+            const src = lv.selectors.length ? lv.selectors.join(', ') : '(no rule matched)';
+            const loc = lv.locations.length ? ` @ ${lv.locations.join(', ')}` : '';
+            console.log(`  [${lv.confidence}] ${lv.label}: height=${lv.declaredHeight ?? '—'} maxHeight=${lv.declaredMaxHeight ?? '—'} (${src}${loc})`);
+            for (const f of lv.redFlags) console.log(`      ⚠ ${f}`);
+          }
+          if (result.anchorLevel) {
+            console.log(`\n${bold('Anchor:')} ${result.anchorLevel}`);
+          } else {
+            console.log(`\n${bold('Anchor:')} none`);
+          }
+          for (const r of result.recommendations) console.log(`${bold('Recommendation:')} ${r}`);
+        }
+
+        cg.destroy();
+      } catch (err) {
+        console.error(`diagnose failed: ${err instanceof Error ? err.message : String(err)}`);
+        process.exit(1);
+      }
+    });
+
+  /**
    * cssgraph property <property> [value]
    */
   program

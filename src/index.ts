@@ -3,7 +3,7 @@ import * as fsp from 'fs/promises';
 import {
   Node, Edge, FileRecord, Subgraph, TraversalOptions,
   SearchOptions, SearchResult, GraphStats, IndexProgress, IndexResult, SyncResult,
-  UnusedResult, CascadeResult, PropertySearchOptions, PropertySearchResult, RuleAnalysisResult, RuleMatch,
+  UnusedResult, CascadeResult, DiagnoseResult, PropertySearchOptions, PropertySearchResult, RuleAnalysisResult, RuleMatch,
 } from './types';
 import { DatabaseConnection, getDatabasePath } from './db';
 import { QueryBuilder } from './db/queries';
@@ -939,6 +939,10 @@ export class CodeGraph {
 
   getCascade(className: string): CascadeResult {
     return this.graphQueries.getCascade(className);
+  }
+
+  diagnoseHeightAnchor(target: string, chain: string[] = [target]): DiagnoseResult {
+    return this.graphQueries.diagnoseHeightAnchor(target, chain);
   }
 
   searchByPropertyValue(options: PropertySearchOptions): PropertySearchResult[] {

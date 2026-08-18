@@ -2,6 +2,7 @@ import { QueryBuilder } from '../db/queries';
 import {
   Node, Context, UnusedResult, CascadeResult, CascadeStep,
   PropertySearchOptions, PropertySearchResult, RuleAnalysisResult, RuleMatch,
+  DiagnoseResult, AnchorLevel, AnchorConfidence,
 } from '../types';
 import { GraphTraverser } from './traversal';
 import selectorParser from 'postcss-selector-parser';
@@ -34,6 +35,35 @@ export function resolveHashedSelector(selector: string, hashMap?: Map<string, st
 
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** Extract className list from a chain label (e.g. 'div.s-kit-modal.site-version-history-dialog-wrapper' or '.s-kit-modal') */
+function extractClasses(label: string): string[] {
+  const classes: string[] = [];
+  for (const part of label.split(/[\s>+~]/)) {
+    const m = part.match(/\.([A-Za-z0-9_-]+)/g);
+    if (m) classes.push(...m.map(c => c.slice(1)));
+  }
+  // Keep tag-only labels (e.g. 'html') so callers can pass tag names
+  return classes.length > 0 ? classes : [label.replace(/^[.#]/, '')];
+}
+
+/** Classify a height declaration: absolute unit = DEFINITE (usable as anchor); % = INDEFINITE (depends on parent); otherwise = UNVERIFIABLE */
+function classifyHeight(declared: string | null): AnchorConfidence {
+  if (!declared) return 'UNVERIFIABLE';
+  if (/^(0|[1-9]\d*)(\.\d+)?(px|vh|vw|rem|em|pt|cm|mm|in)$/.test(declared)) return 'DEFINITE';
+  if (declared.endsWith('%')) return 'INDEFINITE';
+  if (/^calc\(/.test(declared)) {
+    return /(px|vh|vw|rem|em)/.test(declared) ? 'DEFINITE' : 'UNVERIFIABLE';
+  }
+  return 'UNVERIFIABLE';
+}
+
+/** Parse a pure px value; return null if not parseable */
+function parsePx(value: string | null): number | null {
+  if (!value) return null;
+  const m = value.trim().match(/^(\d+(\.\d+)?)px$/);
+  return m ? Number(m[1]) : null;
 }
 
 export class GraphQueryManager {
@@ -240,6 +270,121 @@ export class GraphQueryManager {
       });
     }
     return results;
+  }
+
+  /**
+   * Static anchor diagnosis: walk the DOM ancestor chain, classify each level's height as DEFINITE / INDEFINITE / UNVERIFIABLE.
+   * The chain is supplied by the caller (e.g. ancestor labels from a DOM Reality Report, like ['div.editor-root', 'div.s-kit-modal', ...]).
+   * Each label's classNames are extracted (e.g. 'div.editor-root' → 'editor-root') to look up rules.
+   * Limitation: static analysis cannot know the real DOM structure / transform hijacking / runtime resolution; UNVERIFIABLE is the fallback confidence.
+   */
+  diagnoseHeightAnchor(target: string, chain: string[] = [target]): DiagnoseResult {
+    const levels: AnchorLevel[] = [];
+    const redFlags: string[] = [];
+
+    for (const label of chain) {
+      const classes = extractClasses(label);
+      const level = this.diagnoseLevel(classes, label);
+      levels.push(level);
+      redFlags.push(...level.redFlags);
+    }
+
+    // Find the first level (root→up) that provides a definite height
+    let anchorLevel: string | null = null;
+    for (const lv of levels) {
+      if (lv.providesAnchor) {
+        anchorLevel = lv.label;
+        break;
+      }
+    }
+
+    const hasUnverifiable = levels.some(l => l.confidence === 'UNVERIFIABLE');
+    const anchored = anchorLevel !== null;
+
+    const recommendations: string[] = [];
+    if (anchored) {
+      recommendations.push(`Anchor found at ${anchorLevel} (absolute-unit height). If the target still does not scroll, check for overflow clipping or min-height constraints below this level.`);
+    } else {
+      recommendations.push('No absolute-unit height in the chain → % resolution depends on runtime (parent auto or containing block hijack). Give one level a definite height, e.g. height:100vh.');
+    }
+    if (hasUnverifiable) {
+      recommendations.push('UNVERIFIABLE level present (auto/none/%) → cannot be proven statically; run the DOM Reality Report (browser-agent scripts/dom-report.js) and trust real rendering.');
+    }
+    if (redFlags.length > 0) {
+      recommendations.push('Compensation red flags detected (overflow + large margin / fixed + %). These usually reserve scroll space with margins; prefer a constrained height + overflow:auto instead.');
+    }
+
+    const verdict = anchored
+      ? `Chain has a definite anchor (${anchorLevel})`
+      : hasUnverifiable
+        ? 'No definite anchor and UNVERIFIABLE levels present → resolution depends on runtime; static proof impossible, verify against real rendering'
+        : 'No definite anchor (all INDEFINITE %) → heights depend on parents; walk up until an absolute unit appears';
+
+    return { target, levels, anchored, anchorLevel, verdict, recommendations };
+  }
+
+  private diagnoseLevel(classes: string[], label: string): AnchorLevel {
+    const matched: Array<{ node: Node; props: Array<{ property: string; value: string }> }> = [];
+    for (const cls of classes) {
+      const nodes = this.queries.getClassSelectorsByName(cls);
+      for (const node of nodes) {
+        matched.push({ node, props: node.properties ?? this.getPropertiesForNode(node.id) });
+      }
+    }
+
+    // Sort by specificity desc (approximate effective chain); nodes without specificity go last
+    matched.sort((a, b) => cmpSpecificityDesc(a.node.specificity, b.node.specificity));
+
+    const merge = (prop: string): string | null => {
+      for (const m of matched) {
+        const found = m.props.find(p => p.property === prop && p.value && p.value !== 'auto');
+        if (found) return found.value;
+      }
+      return null;
+    };
+
+    const declaredHeight = merge('height');
+    const declaredMaxHeight = merge('max-height');
+    const overflowY = merge('overflow-y');
+    const marginBottom = merge('margin-bottom');
+    const position = merge('position');
+
+    const selectors = matched.map(m => m.node.selector ?? m.node.name).filter((v, i, a) => a.indexOf(v) === i);
+    const locations = matched.map(m => `${m.node.filePath}:${m.node.startLine}`);
+
+    const confidence: AnchorConfidence = classifyHeight(declaredHeight);
+    const providesAnchor = confidence === 'DEFINITE';
+
+    const flags: string[] = [];
+    if (overflowY === 'auto' || overflowY === 'scroll') {
+      const mb = parsePx(marginBottom);
+      if (mb !== null && mb >= 100) {
+        flags.push(`RED FLAG: overflow-y:${overflowY} + margin-bottom:${marginBottom}(${mb}px) → looks like reserving scroll space with margin`);
+      }
+      if (declaredHeight === null) {
+        flags.push(`overflow-y:${overflowY} without a height declaration → container height depends on parent chain/content`);
+      }
+    }
+    if (position === 'fixed' && declaredHeight && declaredHeight.endsWith('%')) {
+      flags.push(`position:fixed + height:${declaredHeight} → % resolves against the containing block (a transform ancestor can hijack it), unprovable statically`);
+    }
+    if (declaredMaxHeight && !declaredHeight) {
+      flags.push(`Only max-height:${declaredMaxHeight}, no height → a cap is not an anchor; % children still resolve to auto`);
+    }
+    if (!declaredHeight && !declaredMaxHeight) {
+      flags.push('No height/max-height declaration → height depends on content (auto)');
+    }
+
+    return {
+      label,
+      selectors: selectors.slice(0, 5),
+      declaredHeight,
+      declaredMaxHeight,
+      confidence,
+      providesAnchor,
+      redFlags: flags,
+      locations: locations.slice(0, 5),
+    };
   }
 
   private getPropertiesForNode(nodeId: string): Array<{ property: string; value: string }> {
