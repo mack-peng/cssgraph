@@ -22,7 +22,7 @@ specificity, source context, and callers grouped by file.
 - **cssgraph\_details** — quick O(1) exact selector lookup, no edges/impact (lightweight)
 - **cssgraph\_unused** — find CSS class selectors with no incoming references
 - **cssgraph\_cascade** — visualize the cascade path for a className
-- **cssgraph\_diagnose** — static anchor diagnosis: walk the DOM ancestor chain (pass \`chain\` from DOM Reality Report labels), classify each level's height as DEFINITE/INDEFINITE/UNVERIFIABLE, flag compensation patterns (overflow + large margin, fixed + %, max-height only). UNVERIFIABLE => verify at runtime with dom-report.js
+- **cssgraph\_diagnose** — static shape diagnosis: walk the DOM ancestor chain (pass \`chain\` from DOM Reality Report labels), classify layout role (block/flex/fixed/absolute/grid), sizing strategy (fixed/percent/viewport/content) for height and width, detect containing block modifiers, flag compensation patterns (overflow + large margin, fixed + %, max-height only). UNVERIFIABLE => verify at runtime with dom-report.js
 - **cssgraph\_property** — search selectors by CSS property value
 - **cssgraph\_files** — indexed style file tree
 - **cssgraph\_status** — index health check

@@ -419,20 +419,45 @@ export class MCPServer {
     const { default: CodeGraph } = await import('../index');
     const cg = await CodeGraph.open(root);
     try {
-      const result = cg.diagnoseHeightAnchor(className, chain);
-      const lines: string[] = [`Anchor diagnosis for "${className}" — ${result.verdict}\n`];
+      const result = cg.diagnoseShape(className, chain);
+      const lines: string[] = [`Shape diagnosis for "${className}" — ${result.verdict}\n`];
+
+      // Shape chain summary
+      lines.push('## Shape chain');
+      for (const s of result.shapeChain) {
+        lines.push(`  ${s.label}: ${s.role} | h:${s.heightStrategy} w:${s.widthStrategy}`);
+      }
+
+      // Per-level details
+      lines.push('\n## Level details');
       for (const lv of result.levels) {
         const src = lv.selectors.length ? lv.selectors.join(', ') : '(no rule matched)';
         const loc = lv.locations.length ? ` @ ${lv.locations.join(', ')}` : '';
-        lines.push(`[${lv.confidence}] ${lv.label}: height=${lv.declaredHeight ?? '—'} maxHeight=${lv.declaredMaxHeight ?? '—'} (${src}${loc})`);
-        for (const f of lv.redFlags) lines.push(`    ⚠ ${f}`);
+        const display = lv.declaredDisplay ? ` display:${lv.declaredDisplay}` : '';
+        const pos = lv.declaredPosition ? ` position:${lv.declaredPosition}` : '';
+        const overflow = lv.declaredOverflowY ? ` overflow-y:${lv.declaredOverflowY}` : '';
+        const cb = lv.hasContainingBlockModifier ? ' [CB modifier]' : '';
+        lines.push(`[${lv.confidence}] ${lv.label} (${lv.role})${display}${pos}${overflow}${cb}`);
+        lines.push(`  height: ${lv.declaredHeight ?? '—'} (${lv.heightStrategy}) | width: ${lv.declaredWidth ?? '—'} (${lv.widthStrategy}) | max-height: ${lv.declaredMaxHeight ?? '—'}`);
+        lines.push(`  rules: ${src}${loc}`);
+        for (const f of lv.redFlags) lines.push(`  ⚠ ${f}`);
       }
-      if (result.anchorLevel) {
-        lines.push(`\nAnchor: ${result.anchorLevel}`);
-      } else {
-        lines.push('\nAnchor: none');
+
+      // Anchors
+      lines.push('\n## Anchors');
+      lines.push(`Height: ${result.anchorLevel ?? 'none'}`);
+      lines.push(`Width: ${result.widthAnchorLevel ?? 'none'}`);
+
+      // Patterns
+      if (result.patterns.length > 0) {
+        lines.push('\n## Patterns');
+        for (const p of result.patterns) lines.push(`  ${p}`);
       }
-      for (const r of result.recommendations) lines.push(`Recommendation: ${r}`);
+
+      // Recommendations
+      lines.push('\n## Recommendations');
+      for (const r of result.recommendations) lines.push(`  ${r}`);
+
       return lines.join('\n');
     } finally {
       cg.destroy();

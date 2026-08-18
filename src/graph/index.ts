@@ -2,7 +2,7 @@ import { QueryBuilder } from '../db/queries';
 import {
   Node, Context, UnusedResult, CascadeResult, CascadeStep,
   PropertySearchOptions, PropertySearchResult, RuleAnalysisResult, RuleMatch,
-  DiagnoseResult, AnchorLevel, AnchorConfidence,
+  DiagnoseResult, AnchorLevel, AnchorConfidence, LayoutRole, SizingStrategy,
 } from '../types';
 import { GraphTraverser } from './traversal';
 import selectorParser from 'postcss-selector-parser';
@@ -48,7 +48,7 @@ function extractClasses(label: string): string[] {
   return classes.length > 0 ? classes : [label.replace(/^[.#]/, '')];
 }
 
-/** Classify a height declaration: absolute unit = DEFINITE (usable as anchor); % = INDEFINITE (depends on parent); otherwise = UNVERIFIABLE */
+/** Classify a height/width declaration: absolute unit = DEFINITE; % = INDEFINITE; otherwise = UNVERIFIABLE */
 function classifyHeight(declared: string | null): AnchorConfidence {
   if (!declared) return 'UNVERIFIABLE';
   if (/^(0|[1-9]\d*)(\.\d+)?(px|vh|vw|rem|em|pt|cm|mm|in)$/.test(declared)) return 'DEFINITE';
@@ -57,6 +57,31 @@ function classifyHeight(declared: string | null): AnchorConfidence {
     return /(px|vh|vw|rem|em)/.test(declared) ? 'DEFINITE' : 'UNVERIFIABLE';
   }
   return 'UNVERIFIABLE';
+}
+
+/** Classify sizing strategy from a declaration value */
+function classifySizing(val: string | null, maxVal: string | null): SizingStrategy {
+  if (val) {
+    if (/^(0|[1-9]\d*)(\.\d+)?(px|pt|cm|mm|in)$/.test(val)) return 'fixed';
+    if (/^(0|[1-9]\d*)(\.\d+)?(vh|vw|vmin|vmax)$/.test(val)) return 'viewport';
+    if (val.endsWith('%')) return 'percent';
+    if (/^calc\(/.test(val)) return 'calc';
+  }
+  if (maxVal && maxVal !== 'none' && maxVal !== 'auto') return 'constrained';
+  return 'content';
+}
+
+/** Classify layout role from display and position declarations */
+function classifyRole(display: string | null, position: string | null, flexDir: string | null): LayoutRole {
+  if (position === 'fixed') return 'fixed';
+  if (position === 'absolute') return 'absolute';
+  if (position === 'sticky') return 'sticky';
+  if (display === 'grid' || display === 'inline-grid') return 'grid';
+  if (display === 'flex' || display === 'inline-flex') {
+    return flexDir === 'column' ? 'flex-col' : 'flex-row';
+  }
+  if (display === 'inline' || display === 'inline-block') return 'inline';
+  return 'block';
 }
 
 /** Parse a pure px value; return null if not parseable */
@@ -273,23 +298,21 @@ export class GraphQueryManager {
   }
 
   /**
-   * Static anchor diagnosis: walk the DOM ancestor chain, classify each level's height as DEFINITE / INDEFINITE / UNVERIFIABLE.
+   * Static shape diagnosis: walk the DOM ancestor chain, classify layout role + sizing strategy at each level.
    * The chain is supplied by the caller (e.g. ancestor labels from a DOM Reality Report, like ['div.editor-root', 'div.s-kit-modal', ...]).
    * Each label's classNames are extracted (e.g. 'div.editor-root' → 'editor-root') to look up rules.
-   * Limitation: static analysis cannot know the real DOM structure / transform hijacking / runtime resolution; UNVERIFIABLE is the fallback confidence.
+   * Limitation: static analysis cannot know the real DOM structure / transform hijacking / runtime resolution.
    */
-  diagnoseHeightAnchor(target: string, chain: string[] = [target]): DiagnoseResult {
+  diagnoseShape(target: string, chain: string[] = [target]): DiagnoseResult {
     const levels: AnchorLevel[] = [];
-    const redFlags: string[] = [];
 
     for (const label of chain) {
       const classes = extractClasses(label);
       const level = this.diagnoseLevel(classes, label);
       levels.push(level);
-      redFlags.push(...level.redFlags);
     }
 
-    // Find the first level (root→up) that provides a definite height
+    // Height anchor: first level (root→up) with DEFINITE height
     let anchorLevel: string | null = null;
     for (const lv of levels) {
       if (lv.providesAnchor) {
@@ -298,29 +321,78 @@ export class GraphQueryManager {
       }
     }
 
-    const hasUnverifiable = levels.some(l => l.confidence === 'UNVERIFIABLE');
-    const anchored = anchorLevel !== null;
+    // Width anchor: first level with DEFINITE width
+    let widthAnchorLevel: string | null = null;
+    for (const lv of levels) {
+      if (classifyHeight(lv.declaredWidth) === 'DEFINITE') {
+        widthAnchorLevel = lv.label;
+        break;
+      }
+    }
 
+    const anchored = anchorLevel !== null;
+    const widthAnchored = widthAnchorLevel !== null;
+    const allRedFlags = levels.flatMap(l => l.redFlags);
+
+    // Shape chain summary
+    const shapeChain = levels.map(l => ({
+      label: l.label,
+      role: l.role,
+      heightStrategy: l.heightStrategy,
+      widthStrategy: l.widthStrategy,
+    }));
+
+    // Pattern recognition
+    const patterns: string[] = [];
+    const hasFixedAncestor = levels.some(l => l.role === 'fixed');
+    const hasFlexColAncestor = levels.some(l => l.role === 'flex-col');
+    const hasScrollContainer = levels.some(l => l.declaredOverflowY === 'auto' || l.declaredOverflowY === 'scroll');
+    const allContentSized = levels.every(l => l.heightStrategy === 'content');
+
+    if (hasFixedAncestor && !anchored) {
+      patterns.push('fixed ancestor + no height anchor → children % resolve to auto → content-sized overflow');
+    }
+    if (hasFlexColAncestor) {
+      patterns.push('flex-col ancestor → children height governed by flex-grow/shrink/min-height');
+    }
+    if (hasScrollContainer && !anchored) {
+      patterns.push('scroll container exists but no height anchor above → overflow:auto never triggers (content-sized)');
+    }
+    if (allContentSized) {
+      patterns.push('all ancestors are content-sized → height depends entirely on content, no constraints propagate');
+    }
+    if (!widthAnchored) {
+      patterns.push('no absolute width in chain → width depends on parent/content');
+    }
+
+    // Recommendations
     const recommendations: string[] = [];
     if (anchored) {
-      recommendations.push(`Anchor found at ${anchorLevel} (absolute-unit height). If the target still does not scroll, check for overflow clipping or min-height constraints below this level.`);
+      recommendations.push(`Height anchor found at ${anchorLevel}. If the target still does not scroll, check for overflow clipping or min-height constraints below this level.`);
     } else {
-      recommendations.push('No absolute-unit height in the chain → % resolution depends on runtime (parent auto or containing block hijack). Give one level a definite height, e.g. height:100vh.');
+      recommendations.push('No absolute-unit height in the chain → % resolution depends on runtime. Give one level a definite height, e.g. height:100vh.');
     }
+    if (!widthAnchored) {
+      recommendations.push('No absolute width in chain → width depends on parent/content. If width is unexpected, give one level a definite width.');
+    }
+    const hasUnverifiable = levels.some(l => l.confidence === 'UNVERIFIABLE');
     if (hasUnverifiable) {
-      recommendations.push('UNVERIFIABLE level present (auto/none/%) → cannot be proven statically; run the DOM Reality Report (browser-agent scripts/dom-report.js) and trust real rendering.');
+      recommendations.push('UNVERIFIABLE level present → cannot be proven statically; run dom-report.js and trust real rendering.');
     }
-    if (redFlags.length > 0) {
-      recommendations.push('Compensation red flags detected (overflow + large margin / fixed + %). These usually reserve scroll space with margins; prefer a constrained height + overflow:auto instead.');
+    if (allRedFlags.length > 0) {
+      recommendations.push('Red flags detected (overflow + large margin / fixed + % / max-height only). See level details.');
+    }
+    if (patterns.length > 0) {
+      recommendations.push(`Patterns detected: ${patterns.join('; ')}`);
     }
 
     const verdict = anchored
-      ? `Chain has a definite anchor (${anchorLevel})`
+      ? `Chain has a definite height anchor (${anchorLevel})`
       : hasUnverifiable
-        ? 'No definite anchor and UNVERIFIABLE levels present → resolution depends on runtime; static proof impossible, verify against real rendering'
-        : 'No definite anchor (all INDEFINITE %) → heights depend on parents; walk up until an absolute unit appears';
+        ? 'No definite height anchor and UNVERIFIABLE levels → resolution depends on runtime; verify against real rendering'
+        : 'No definite height anchor (all INDEFINITE %) → heights depend on parents; walk up until an absolute unit appears';
 
-    return { target, levels, anchored, anchorLevel, verdict, recommendations };
+    return { target, levels, anchored, anchorLevel, widthAnchored, widthAnchorLevel, shapeChain, patterns, verdict, recommendations };
   }
 
   private diagnoseLevel(classes: string[], label: string): AnchorLevel {
@@ -345,27 +417,41 @@ export class GraphQueryManager {
 
     const declaredHeight = merge('height');
     const declaredMaxHeight = merge('max-height');
-    const overflowY = merge('overflow-y');
+    const declaredWidth = merge('width');
+    const declaredMaxWidth = merge('max-width');
+    const declaredDisplay = merge('display');
+    const declaredPosition = merge('position');
+    const declaredFlexDir = merge('flex-direction');
+    const declaredOverflowY = merge('overflow-y');
     const marginBottom = merge('margin-bottom');
-    const position = merge('position');
+
+    // Containing block modifiers
+    const cbProps = ['transform', 'filter', 'perspective', 'will-change', 'contain'];
+    const hasContainingBlockModifier = cbProps.some(p => {
+      const v = merge(p);
+      return v && v !== 'none' && v !== 'auto' && v !== 'normal';
+    });
 
     const selectors = matched.map(m => m.node.selector ?? m.node.name).filter((v, i, a) => a.indexOf(v) === i);
     const locations = matched.map(m => `${m.node.filePath}:${m.node.startLine}`);
 
     const confidence: AnchorConfidence = classifyHeight(declaredHeight);
     const providesAnchor = confidence === 'DEFINITE';
+    const role: LayoutRole = classifyRole(declaredDisplay, declaredPosition, declaredFlexDir);
+    const heightStrategy: SizingStrategy = classifySizing(declaredHeight, declaredMaxHeight);
+    const widthStrategy: SizingStrategy = classifySizing(declaredWidth, declaredMaxWidth);
 
     const flags: string[] = [];
-    if (overflowY === 'auto' || overflowY === 'scroll') {
+    if (declaredOverflowY === 'auto' || declaredOverflowY === 'scroll') {
       const mb = parsePx(marginBottom);
       if (mb !== null && mb >= 100) {
-        flags.push(`RED FLAG: overflow-y:${overflowY} + margin-bottom:${marginBottom}(${mb}px) → looks like reserving scroll space with margin`);
+        flags.push(`RED FLAG: overflow-y:${declaredOverflowY} + margin-bottom:${marginBottom}(${mb}px) → looks like reserving scroll space with margin`);
       }
       if (declaredHeight === null) {
-        flags.push(`overflow-y:${overflowY} without a height declaration → container height depends on parent chain/content`);
+        flags.push(`overflow-y:${declaredOverflowY} without a height declaration → container height depends on parent chain/content`);
       }
     }
-    if (position === 'fixed' && declaredHeight && declaredHeight.endsWith('%')) {
+    if (declaredPosition === 'fixed' && declaredHeight && declaredHeight.endsWith('%')) {
       flags.push(`position:fixed + height:${declaredHeight} → % resolves against the containing block (a transform ancestor can hijack it), unprovable statically`);
     }
     if (declaredMaxHeight && !declaredHeight) {
@@ -374,12 +460,24 @@ export class GraphQueryManager {
     if (!declaredHeight && !declaredMaxHeight) {
       flags.push('No height/max-height declaration → height depends on content (auto)');
     }
+    if (hasContainingBlockModifier) {
+      const cbDeclared = cbProps.filter(p => { const v = merge(p); return v && v !== 'none' && v !== 'auto' && v !== 'normal'; });
+      flags.push(`Containing block modifier: ${cbDeclared.join(', ')} → establishes new containing block for fixed/absolute descendants`);
+    }
 
     return {
       label,
       selectors: selectors.slice(0, 5),
+      role,
+      heightStrategy,
+      widthStrategy,
       declaredHeight,
       declaredMaxHeight,
+      declaredWidth,
+      declaredDisplay,
+      declaredPosition,
+      declaredOverflowY,
+      hasContainingBlockModifier,
       confidence,
       providesAnchor,
       redFlags: flags,

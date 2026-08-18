@@ -941,8 +941,8 @@ export class CodeGraph {
     return this.graphQueries.getCascade(className);
   }
 
-  diagnoseHeightAnchor(target: string, chain: string[] = [target]): DiagnoseResult {
-    return this.graphQueries.diagnoseHeightAnchor(target, chain);
+  diagnoseShape(target: string, chain: string[] = [target]): DiagnoseResult {
+    return this.graphQueries.diagnoseShape(target, chain);
   }
 
   searchByPropertyValue(options: PropertySearchOptions): PropertySearchResult[] {

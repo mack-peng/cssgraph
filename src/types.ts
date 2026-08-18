@@ -193,23 +193,41 @@ export interface CascadeResult {
   steps: CascadeStep[];
 }
 
-// Static anchor diagnosis: classify height declarations level by level along the DOM ancestor chain (supplied by the caller)
+// Static shape diagnosis: classify layout declarations level by level along the DOM ancestor chain
 export type AnchorConfidence = 'DEFINITE' | 'INDEFINITE' | 'UNVERIFIABLE';
+export type LayoutRole = 'block' | 'flex-row' | 'flex-col' | 'grid' | 'fixed' | 'absolute' | 'sticky' | 'inline';
+export type SizingStrategy = 'fixed' | 'percent' | 'viewport' | 'content' | 'constrained' | 'calc';
 
 export interface AnchorLevel {
   /** Chain level label, e.g. 'div.s-kit-modal' or '.s-kit-modal' */
   label: string;
   /** Matching rule selectors (may be multiple; highest-specificity effective) */
   selectors: string[];
+  /** Layout role from display/position declarations */
+  role: LayoutRole;
+  /** Height sizing strategy based on declared values */
+  heightStrategy: SizingStrategy;
+  /** Width sizing strategy based on declared values */
+  widthStrategy: SizingStrategy;
   /** Declared height value (raw string), null when not declared */
   declaredHeight: string | null;
   /** Declared max-height value (raw string), null when not declared */
   declaredMaxHeight: string | null;
+  /** Declared width value (raw string), null when not declared */
+  declaredWidth: string | null;
+  /** Declared display value, null when not declared */
+  declaredDisplay: string | null;
+  /** Declared position value, null when not declared */
+  declaredPosition: string | null;
+  /** Declared overflow-y value, null when not declared */
+  declaredOverflowY: string | null;
+  /** Whether this level has a containing block modifier (transform/filter/perspective) */
+  hasContainingBlockModifier: boolean;
   /** Confidence classification of the height declaration */
   confidence: AnchorConfidence;
   /** Whether this level's declaration gives % children a definite height (DEFINITE absolute units only) */
   providesAnchor: boolean;
-  /** Compensation red flags: overflow-y:auto/scroll + large margin patterns that reserve scroll space */
+  /** Compensation red flags: overflow + large margin, fixed + %, max-height only, etc. */
   redFlags: string[];
   /** Rule locations as filePath:startLine */
   locations: string[];
@@ -220,10 +238,18 @@ export interface DiagnoseResult {
   target: string;
   /** Per-level diagnosis along the chain */
   levels: AnchorLevel[];
-  /** Whether the chain contains a definite anchor */
+  /** Whether the chain contains a definite height anchor */
   anchored: boolean;
-  /** Label of the level holding the anchor, null when none */
+  /** Label of the level holding the height anchor, null when none */
   anchorLevel: string | null;
+  /** Whether the chain contains a definite width anchor */
+  widthAnchored: boolean;
+  /** Label of the level holding the width anchor, null when none */
+  widthAnchorLevel: string | null;
+  /** Shape summary: layout role chain */
+  shapeChain: Array<{ label: string; role: LayoutRole; heightStrategy: SizingStrategy; widthStrategy: SizingStrategy }>;
+  /** Detected layout patterns */
+  patterns: string[];
   /** Verdict summary */
   verdict: string;
   /** Fix recommendations */

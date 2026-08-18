@@ -535,7 +535,7 @@ program
    */
   program
     .command('diagnose <className> [chain...]')
-    .description('Static anchor diagnosis: classify height declarations along the DOM ancestor chain')
+    .description('Static shape diagnosis: classify layout role + sizing strategy along the DOM ancestor chain')
     .option('-p, --path <path>', 'Project path')
     .option('-j, --json', 'Output as JSON')
     .action(async (className: string, chain: string[], options: { path?: string; json?: boolean }) => {
@@ -550,24 +550,43 @@ program
         const { default: CodeGraph } = await import('../index');
         const cg = await CodeGraph.open(projectPath);
         const effectiveChain = chain.length > 0 ? chain : [className];
-        const result = cg.diagnoseHeightAnchor(className, effectiveChain);
+        const result = cg.diagnoseShape(className, effectiveChain);
 
         if (options.json) {
           console.log(JSON.stringify(result, null, 2));
         } else {
-          console.log(`\n${bold('Anchor diagnosis')} for "${className}" — ${result.verdict}\n`);
+          console.log(`\n${bold('Shape diagnosis')} for "${className}" — ${result.verdict}\n`);
+
+          console.log(bold('Shape chain:'));
+          for (const s of result.shapeChain) {
+            console.log(`  ${s.label}: ${s.role} | h:${s.heightStrategy} w:${s.widthStrategy}`);
+          }
+
+          console.log(`\n${bold('Level details:')}`);
           for (const lv of result.levels) {
             const src = lv.selectors.length ? lv.selectors.join(', ') : '(no rule matched)';
             const loc = lv.locations.length ? ` @ ${lv.locations.join(', ')}` : '';
-            console.log(`  [${lv.confidence}] ${lv.label}: height=${lv.declaredHeight ?? '—'} maxHeight=${lv.declaredMaxHeight ?? '—'} (${src}${loc})`);
-            for (const f of lv.redFlags) console.log(`      ⚠ ${f}`);
+            const display = lv.declaredDisplay ? ` display:${lv.declaredDisplay}` : '';
+            const pos = lv.declaredPosition ? ` position:${lv.declaredPosition}` : '';
+            const overflow = lv.declaredOverflowY ? ` overflow-y:${lv.declaredOverflowY}` : '';
+            const cb = lv.hasContainingBlockModifier ? ' [CB]' : '';
+            console.log(`  [${lv.confidence}] ${lv.label} (${lv.role})${display}${pos}${overflow}${cb}`);
+            console.log(`    height: ${lv.declaredHeight ?? '—'} (${lv.heightStrategy}) | width: ${lv.declaredWidth ?? '—'} (${lv.widthStrategy}) | max-height: ${lv.declaredMaxHeight ?? '—'}`);
+            console.log(`    rules: ${src}${loc}`);
+            for (const f of lv.redFlags) console.log(`    ⚠ ${f}`);
           }
-          if (result.anchorLevel) {
-            console.log(`\n${bold('Anchor:')} ${result.anchorLevel}`);
-          } else {
-            console.log(`\n${bold('Anchor:')} none`);
+
+          console.log(`\n${bold('Anchors:')}`);
+          console.log(`  Height: ${result.anchorLevel ?? 'none'}`);
+          console.log(`  Width: ${result.widthAnchorLevel ?? 'none'}`);
+
+          if (result.patterns.length > 0) {
+            console.log(`\n${bold('Patterns:')}`);
+            for (const p of result.patterns) console.log(`  ${p}`);
           }
-          for (const r of result.recommendations) console.log(`${bold('Recommendation:')} ${r}`);
+
+          console.log(`\n${bold('Recommendations:')}`);
+          for (const r of result.recommendations) console.log(`  ${r}`);
         }
 
         cg.destroy();
