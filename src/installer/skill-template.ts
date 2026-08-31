@@ -1,7 +1,7 @@
 /**
  * cssgraph Agent Skill templates.
  *
- * Installed into each agent's skill directory during `cssgraph install`.
+ * Installed into each agent's skill directory during `cssgraph mcp-install`.
  * The SKILL.md teaches agents WHEN and HOW to use cssgraph's 13 MCP
  * tools effectively, encoding the decision tree, workflow patterns,
  * and per-tool pitfalls discovered from the codebase.

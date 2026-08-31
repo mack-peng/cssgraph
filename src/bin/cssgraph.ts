@@ -1100,10 +1100,11 @@ program
   });
 
 /**
- * cssgraph install
+ * cssgraph mcp-install (alias: install)
  */
 program
-  .command('install')
+  .command('mcp-install')
+  .alias('install')
   .description('Wire up cssgraph MCP server to your AI agents')
   .option('--target <ids>', 'Agent targets (auto, all, or csv: claude,opencode)')
   .option('--location <loc>', 'Config location (global, local)', 'global')
@@ -1125,11 +1126,11 @@ program
   });
 
 /**
- * cssgraph install-skills
+ * cssgraph skill-install
  */
 program
-  .command('install-skills')
-  .description('Update SKILL.md only (no MCP config changes)')
+  .command('skill-install')
+  .description('Install or update agent skill (SKILL.md only, no MCP config changes)')
   .option('--target <ids>', 'Agent targets (auto, all, or csv: claude,opencode)')
   .option('--location <loc>', 'Config location (global, local)', 'global')
   .action(async (options: { target?: string; location?: string }) => {
@@ -1140,16 +1141,38 @@ program
         location: options.location,
       });
     } catch (err) {
-      console.error(`Skill update failed: ${err instanceof Error ? err.message : String(err)}`);
+      console.error(`Skill install failed: ${err instanceof Error ? err.message : String(err)}`);
       process.exit(1);
     }
   });
 
 /**
- * cssgraph uninstall
+ * cssgraph skill-uninstall
  */
 program
-  .command('uninstall')
+  .command('skill-uninstall')
+  .description('Remove agent skill (SKILL.md only, no MCP config changes)')
+  .option('--target <ids>', 'Agent targets (auto, all, or csv: claude,opencode)')
+  .option('--location <loc>', 'Config location (global, local)', 'global')
+  .action(async (options: { target?: string; location?: string }) => {
+    try {
+      const { runUninstallSkills } = await import('../installer');
+      await runUninstallSkills({
+        target: options.target,
+        location: options.location,
+      });
+    } catch (err) {
+      console.error(`Skill uninstall failed: ${err instanceof Error ? err.message : String(err)}`);
+      process.exit(1);
+    }
+  });
+
+/**
+ * cssgraph mcp-uninstall (alias: uninstall)
+ */
+program
+  .command('mcp-uninstall')
+  .alias('uninstall')
   .description('Remove cssgraph from your AI agents')
   .option('--target <ids>', 'Agent targets (auto, all, or csv: claude,opencode)')
   .option('--location <loc>', 'Config location (global, local)', 'global')
