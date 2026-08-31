@@ -22,7 +22,7 @@ import {
   getTarget,
   resolveTargetFlag,
 } from './targets/registry';
-import { writeSkill } from './targets/shared';
+import { writeSkill, removeSkill } from './targets/shared';
 import type { AgentTarget, Location, TargetId } from './targets/types';
 
 // Dynamic import helper — tsc compiles import() to require() in CJS mode,
@@ -248,6 +248,40 @@ export async function runInstallSkills(opts: { target?: string; location?: strin
   }
 
   clack.outro('Done! Restart your agents to pick up skill changes.');
+}
+
+/**
+ * Lightweight skill-only uninstaller: removes the cssgraph skill directory
+ * from each agent's skill directory, without touching MCP config or instructions.
+ */
+export async function runUninstallSkills(opts: { target?: string; location?: string }): Promise<void> {
+  const clack = await importESM('@clack/prompts');
+  clack.intro(`cssgraph v${getVersion()} — uninstall skills`);
+
+  const location: Location = (opts.location as Location) ?? 'global';
+  const targets = opts.target
+    ? resolveTargetFlag(opts.target, location)
+    : detectAll(location)
+        .filter(({ detection }) => detection.installed)
+        .map(({ target }) => target);
+
+  if (targets.length === 0) {
+    clack.outro('No agent targets detected — nothing to do.');
+    return;
+  }
+
+  for (const target of targets) {
+    const sd = target.skillDir(location);
+    if (!sd) {
+      clack.log.info(`${target.displayName}: no skill directory — skipped`);
+      continue;
+    }
+    const result = removeSkill(sd);
+    const verb = result.action === 'removed' ? 'Removed' : result.action === 'not-found' ? 'Not found' : 'Skipped';
+    clack.log.success(`${target.displayName}: ${verb} ${tildify(result.path)}`);
+  }
+
+  clack.outro('Done! Restart your agents to apply changes.');
 }
 
 export interface RunUninstallerOptions {

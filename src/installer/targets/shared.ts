@@ -101,7 +101,7 @@ export function writeJsonFile(filePath: string, data: Record<string, any>): void
 }
 
 /**
- * Check whether a directory was likely created by a previous cssgraph install
+ * Check whether a directory was likely created by a previous cssgraph mcp-install
  * run rather than by the actual agent tooling. Avoids the self-fulfilling
  * detection loop: cssgraph creates the dir → "detected" → re-installs forever.
  *

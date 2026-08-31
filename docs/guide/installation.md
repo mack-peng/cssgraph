@@ -31,7 +31,7 @@ cssgraph exposes itself as an MCP server. Add it to your agent's MCP config so t
 ### Auto-install
 
 ```bash
-cssgraph install
+cssgraph mcp-install
 ```
 
 Auto-detects and configures opencode, Claude Code, Cursor, Codex CLI, Gemini CLI,

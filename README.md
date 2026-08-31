@@ -68,7 +68,7 @@ Requires Node.js >= 22.5.0 (for `node:sqlite`).
 ### 2. Wire up your agent
 
 ```bash
-cssgraph install
+cssgraph mcp-install
 ```
 
 Auto-detects and configures opencode, Claude Code, Cursor, Codex CLI, Gemini CLI,
@@ -150,9 +150,10 @@ cssgraph files [path]                      # Project style file tree
 cssgraph status [path]                     # Index statistics
 cssgraph sync [path]                       # Incremental update
 cssgraph serve --mcp                       # Start MCP server
-cssgraph install                           # Auto-wire to your AI agent
-cssgraph install-skills                    # Update SKILL.md only (no MCP config changes)
-cssgraph uninstall                         # Remove from your AI agent
+cssgraph mcp-install                       # Auto-wire to your AI agent (alias: install)
+cssgraph skill-install                     # Install/update SKILL.md only (no MCP config changes)
+cssgraph skill-uninstall                   # Remove SKILL.md only (no MCP config changes)
+cssgraph mcp-uninstall                     # Remove from your AI agent (alias: uninstall)
 cssgraph version                           # Print installed version
 ```
 
