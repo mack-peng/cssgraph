@@ -242,14 +242,41 @@ export class MCPServer {
     const root = await this.getProjectPath(args);
     if (!root) return this.notInitialized();
     const { default: CodeGraph } = await import('../index');
+    const { validateSelectorComplexity } = await import('../graph/index');
     const cg = await CodeGraph.open(root);
     try {
+      // Validate selector complexity
+      const validation = validateSelectorComplexity(selector);
+      const lines: string[] = [`Rule: ${selector}\n`];
+
+      // Add warning for simple selectors
+      if (validation.warning) {
+        lines.push(`⚠ Warning: ${validation.warning}`);
+        if (validation.suggestion) {
+          lines.push(`  Suggestion: ${validation.suggestion}`);
+        }
+        lines.push('');
+      }
+
       const result = cg.analyzeRule(selector);
       if (result.exactMatches.length === 0 && result.containsMatches.length === 0 && result.classUsage.length === 0) {
         return `No rules found matching "${selector}".`;
       }
 
-      const lines: string[] = [`Rule: ${selector}\n`];
+      // Disambiguation: if multiple exact matches, prompt user to be more specific
+      if (result.exactMatches.length > 1) {
+        lines.push(`Found ${result.exactMatches.length} exact matches. Please specify the full selector:\n`);
+        for (let i = 0; i < result.exactMatches.length; i++) {
+          const m = result.exactMatches[i]!;
+          lines.push(`  ${i + 1}. ${m.node.selector ?? m.node.name} — ${m.node.filePath}:${m.node.startLine}`);
+          if (m.properties && m.properties.length > 0) {
+            lines.push(`     Properties: ${m.properties.slice(0, 3).map(p => `${p.property}: ${p.value}`).join(', ')}${m.properties.length > 3 ? '...' : ''}`);
+          }
+        }
+        lines.push('');
+        lines.push('Use the full selector (e.g., ".container .button" instead of ".button") for precise results.');
+        return lines.join('\n');
+      }
 
       if (result.exactMatches.length > 0) {
         lines.push('Exact matches:');
@@ -293,14 +320,51 @@ export class MCPServer {
     const root = await this.getProjectPath(args);
     if (!root) return this.notInitialized();
     const { default: CodeGraph } = await import('../index');
+    const { validateSelectorComplexity } = await import('../graph/index');
     const cg = await CodeGraph.open(root);
     try {
+      // Validate selector complexity
+      const validation = validateSelectorComplexity(selector);
+      const lines: string[] = [];
+
+      // Add warning for simple selectors
+      if (validation.warning) {
+        lines.push(`⚠ Warning: ${validation.warning}`);
+        if (validation.suggestion) {
+          lines.push(`  Suggestion: ${validation.suggestion}`);
+        }
+        lines.push('');
+      }
+
       const matches = cg.selectorDetails(selector);
-      if (matches.length === 0) return `No exact match for "${selector}".`;
-      return matches.map(m =>
-        `${m.node.selector ?? m.node.name} — ${m.node.filePath}:${m.node.startLine}` +
-        (m.properties?.length ? ` (${m.properties.map(p => `${p.property}: ${p.value}`).join('; ')})` : '')
-      ).join('\n');
+      if (matches.length === 0) {
+        lines.push(`No exact match for "${selector}".`);
+        return lines.join('\n');
+      }
+
+      // Disambiguation: if multiple matches, show all with file locations
+      if (matches.length > 1) {
+        lines.push(`Found ${matches.length} exact matches for "${selector}":\n`);
+        for (let i = 0; i < matches.length; i++) {
+          const m = matches[i]!;
+          lines.push(`${i + 1}. ${m.node.selector ?? m.node.name} — ${m.node.filePath}:${m.node.startLine}`);
+          if (m.properties && m.properties.length > 0) {
+            lines.push(`   Properties: ${m.properties.map(p => `${p.property}: ${p.value}`).join('; ')}`);
+          }
+        }
+        lines.push('');
+        lines.push('Use the full selector for precise results, or specify the file path.');
+        return lines.join('\n');
+      }
+
+      // Single match - show details
+      const m = matches[0]!;
+      lines.push(`${m.node.selector ?? m.node.name} — ${m.node.filePath}:${m.node.startLine}`);
+      if (m.properties && m.properties.length > 0) {
+        lines.push(`Properties: ${m.properties.map(p => `${p.property}: ${p.value}`).join('; ')}`);
+      }
+
+      return lines.join('\n');
     } finally {
       cg.destroy();
     }
@@ -311,10 +375,23 @@ export class MCPServer {
     const root = await this.getProjectPath(args);
     if (!root) return this.notInitialized();
     const { default: CodeGraph } = await import('../index');
+    const { validateSelectorComplexity } = await import('../graph/index');
     const cg = await CodeGraph.open(root);
     try {
+      // Validate selector complexity
+      const validation = validateSelectorComplexity(selector);
+      const lines: string[] = [`Selector: ${selector}\n`];
+
+      // Add warning for simple selectors
+      if (validation.warning) {
+        lines.push(`⚠ Warning: ${validation.warning}`);
+        if (validation.suggestion) {
+          lines.push(`  Suggestion: ${validation.suggestion}`);
+        }
+        lines.push('');
+      }
+
       const impact = cg.selectorImpact(selector);
-      const lines: string[] = [`Selector: ${impact.selector}\n`];
 
       if (impact.definition.length > 0) {
         lines.push('Definition:');
