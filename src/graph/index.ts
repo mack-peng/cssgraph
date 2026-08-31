@@ -91,6 +91,104 @@ function parsePx(value: string | null): number | null {
   return m ? Number(m[1]) : null;
 }
 
+export interface SelectorValidation {
+  isValid: boolean;
+  complexity: 'simple' | 'moderate' | 'complex';
+  warning?: string;
+  suggestion?: string;
+  parts: {
+    classes: string[];
+    ids: string[];
+    tags: string[];
+    combinators: string[];
+    pseudoClasses: string[];
+    pseudoElements: string[];
+    attributes: string[];
+  };
+}
+
+/**
+ * Validate selector complexity and provide warnings for simple selectors.
+ * Simple selectors (e.g., ".button") may match multiple rules and cause ambiguous results.
+ */
+export function validateSelectorComplexity(selector: string): SelectorValidation {
+  const normalized = normalizeSelector(selector);
+  const result: SelectorValidation = {
+    isValid: true,
+    complexity: 'simple',
+    parts: {
+      classes: [],
+      ids: [],
+      tags: [],
+      combinators: [],
+      pseudoClasses: [],
+      pseudoElements: [],
+      attributes: [],
+    },
+  };
+
+  try {
+    const root = selectorParser().astSync(normalized);
+
+    root.walk((node) => {
+      switch (node.type) {
+        case 'class':
+          result.parts.classes.push(node.value);
+          break;
+        case 'id':
+          result.parts.ids.push(node.value);
+          break;
+        case 'tag':
+          result.parts.tags.push(node.value);
+          break;
+        case 'combinator':
+          result.parts.combinators.push(node.value);
+          break;
+        case 'pseudo':
+          if (node.value.startsWith('::')) {
+            result.parts.pseudoElements.push(node.value);
+          } else {
+            result.parts.pseudoClasses.push(node.value);
+          }
+          break;
+        case 'attribute':
+          result.parts.attributes.push(node.attribute);
+          break;
+      }
+    });
+  } catch {
+    result.isValid = false;
+    result.warning = `Invalid selector syntax: "${selector}"`;
+    return result;
+  }
+
+  // Determine complexity
+  const { classes, ids, tags, combinators, pseudoClasses, pseudoElements, attributes } = result.parts;
+  const totalParts = classes.length + ids.length + tags.length + combinators.length + 
+                     pseudoClasses.length + pseudoElements.length + attributes.length;
+
+  if (totalParts >= 4 || combinators.length > 0 || pseudoClasses.length > 0 || pseudoElements.length > 0) {
+    result.complexity = 'complex';
+  } else if (totalParts >= 2 || classes.length >= 2 || ids.length >= 1) {
+    result.complexity = 'moderate';
+  } else {
+    result.complexity = 'simple';
+  }
+
+  // Add warnings for simple selectors
+  if (result.complexity === 'simple') {
+    if (classes.length === 1 && ids.length === 0 && tags.length === 0) {
+      result.warning = `Simple class selector ".${classes[0]}" may match multiple CSS rules.`;
+      result.suggestion = `Consider using a more specific selector (e.g., ".container .${classes[0]}" or "#main .${classes[0]}").`;
+    } else if (tags.length === 1 && classes.length === 0 && ids.length === 0) {
+      result.warning = `Simple tag selector "${tags[0]}" may match many elements.`;
+      result.suggestion = `Consider adding a class or ID to narrow the scope (e.g., ".container ${tags[0]}").`;
+    }
+  }
+
+  return result;
+}
+
 export class GraphQueryManager {
   private queries: QueryBuilder;
   private traverser: GraphTraverser;

@@ -693,7 +693,20 @@ program
 
       try {
         const { default: CodeGraph } = await import('../index');
+        const { validateSelectorComplexity } = await import('../graph/index');
         const cg = await CodeGraph.open(projectPath);
+
+        // Validate selector complexity
+        const validation = validateSelectorComplexity(selector);
+
+        if (!options.json && validation.warning) {
+          console.log(`${warn(validation.warning)}`);
+          if (validation.suggestion) {
+            console.log(`  ${dim(validation.suggestion)}`);
+          }
+          console.log('');
+        }
+
         const result = cg.analyzeRule(selector);
 
         if (options.json) {
@@ -711,6 +724,22 @@ program
             console.log(`${bold('Tags:')} ${result.tags.join(' ')}`);
           }
           console.log('');
+
+          // Disambiguation: if multiple exact matches, prompt user to be more specific
+          if (result.exactMatches.length > 1) {
+            console.log(`${bold('Exact matches:')} Found ${result.exactMatches.length} matches. Please specify the full selector:\n`);
+            for (let i = 0; i < result.exactMatches.length; i++) {
+              const m = result.exactMatches[i]!;
+              console.log(`  ${i + 1}. ${m.node.selector ?? m.node.name}  ${dim(`${m.node.filePath}:${m.node.startLine}`)}`);
+              if (m.properties && m.properties.length > 0) {
+                console.log(`     ${dim(`Properties: ${m.properties.slice(0, 3).map(p => `${p.property}: ${p.value}`).join(', ')}${m.properties.length > 3 ? '...' : ''}`)}`);
+              }
+            }
+            console.log('');
+            console.log(`${dim('Use the full selector (e.g., ".container .button" instead of ".button") for precise results.')}`);
+            cg.destroy();
+            return;
+          }
 
           if (result.exactMatches.length === 0) {
             console.log(`${bold('Exact matches:')} ${dim('(none) — no selector matched exactly')}\n`);
@@ -787,7 +816,20 @@ program
 
       try {
         const { default: CodeGraph, normalizeSelector } = await import('../index');
+        const { validateSelectorComplexity } = await import('../graph/index');
         const cg = await CodeGraph.open(projectPath);
+
+        // Validate selector complexity
+        const validation = validateSelectorComplexity(selector);
+
+        if (!options.json && validation.warning) {
+          console.log(`${warn(validation.warning)}`);
+          if (validation.suggestion) {
+            console.log(`  ${dim(validation.suggestion)}`);
+          }
+          console.log('');
+        }
+
         const matches = cg.selectorDetails(selector);
         const normalized = normalizeSelector(selector);
 
@@ -803,7 +845,20 @@ program
         } else {
           if (matches.length === 0) {
             console.log(`${dim('No exact match found.')} Use ${bold('cssgraph rule')} "${normalized}" for related search.`);
+          } else if (matches.length > 1) {
+            // Disambiguation: show all matches with file locations
+            console.log(`\n${bold('Exact matches:')} Found ${matches.length} matches for ${bold(normalized)}:\n`);
+            for (let i = 0; i < matches.length; i++) {
+              const m = matches[i]!;
+              console.log(`  ${i + 1}. ${m.node.selector ?? m.node.name}  ${dim(`${m.node.filePath}:${m.node.startLine}`)}`);
+              if (m.properties && m.properties.length > 0) {
+                console.log(`     ${dim(`Properties: ${m.properties.slice(0, 3).map(p => `${p.property}: ${p.value}`).join(', ')}${m.properties.length > 3 ? '...' : ''}`)}`);
+              }
+            }
+            console.log('');
+            console.log(`${dim('Use the full selector for precise results, or specify the file path.')}`);
           } else {
+            // Single match
             console.log(`\n${matches.length} match(es) for ${bold(normalized)}:\n`);
             for (const m of matches) {
               console.log(`  ${m.node.selector ?? m.node.name}  ${dim(`${m.node.filePath}:${m.node.startLine}`)}`);
@@ -845,7 +900,20 @@ program
 
       try {
         const { default: CodeGraph } = await import('../index');
+        const { validateSelectorComplexity } = await import('../graph/index');
         const cg = await CodeGraph.open(projectPath);
+
+        // Validate selector complexity
+        const validation = validateSelectorComplexity(selector);
+
+        if (!options.json && validation.warning) {
+          console.log(`${warn(validation.warning)}`);
+          if (validation.suggestion) {
+            console.log(`  ${dim(validation.suggestion)}`);
+          }
+          console.log('');
+        }
+
         const impact = cg.selectorImpact(selector);
 
         if (options.json) {
