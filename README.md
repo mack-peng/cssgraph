@@ -192,6 +192,35 @@ This enables `cssgraph_impact`, `cssgraph_callers`, and `cssgraph_rule` to track
 
 ---
 
+## Complementary Tool: cssprobe-cli
+
+cssgraph is a **static** analysis tool — it reads your source code and answers where a class is defined, what cascades over it, and what a change would affect. For **runtime** questions — what a page actually renders in a browser (overflow, scroll chains, computed height chains, containing block hijacks) — use [cssprobe-cli](https://github.com/mack-peng/cssprobe-cli), which opens a real browser and reads computed styles plus DOM metrics. The two tools complement each other:
+
+| | cssgraph (static) | cssprobe-cli (runtime) |
+|---|---|---|
+| Analyzes | source code (CSS/SCSS/Less + JSX/TSX + templates) | live browser (computed styles + DOM) |
+| Answers | where a class is defined, cascade, impact, unused CSS | actual rendered layout, overflow, scroll, height chains |
+| When | before/without a browser | after static analysis, to verify at runtime |
+| Usage | `cssgraph init` + `explore`/`rule`/`impact` | `open` + `inspect`/`layout`/`findings` |
+
+**Recommended workflow for a style problem** — go static first, then verify at runtime:
+
+```bash
+# 1. Static: find the definitions, cascade, and blast radius (cssgraph)
+cssgraph explore .btn-primary
+cssgraph cascade .btn-primary
+
+# 2. Runtime: confirm what actually renders (cssprobe-cli)
+npm i -g cssprobe-cli
+cssprobe-cli open https://example.com
+cssprobe-cli inspect .btn-primary
+cssprobe-cli findings .btn-primary
+```
+
+Install: `npm install -g cssprobe-cli` (requires Node.js >= 22.5.0). See [npm](https://www.npmjs.com/package/cssprobe-cli) / [GitHub](https://github.com/mack-peng/cssprobe-cli).
+
+---
+
 ## Supported Languages
 
 | Language | Extension | Extraction |

@@ -162,6 +162,30 @@ The MCP server (`cssgraph serve --mcp`) exposes these to your AI agent.
 | `cssgraph files` | `cssgraph_files` | List project style file structure |
 | `cssgraph status` | `cssgraph_status` | Index statistics |
 
+## Complementary Tool: cssprobe-cli
+
+cssgraph answers **static** questions — where a class is defined, its cascade, and its impact. For **runtime** questions — what a page actually renders (overflow, scroll, height chains, containing block hijacks) — install [cssprobe-cli](https://github.com/mack-peng/cssprobe-cli). It opens a real browser and reads computed styles + DOM metrics in one command.
+
+```bash
+npm install -g cssprobe-cli   # requires Node.js >= 22.5.0
+npx playwright install chromium
+```
+
+**Work together — static first, runtime to verify:**
+
+```bash
+# 1. Static (cssgraph): locate definitions, cascade, impact
+cssgraph explore .modal
+cssgraph rule ".modal > .content"
+
+# 2. Runtime (cssprobe-cli): confirm actual rendering
+cssprobe-cli open https://example.com
+cssprobe-cli inspect .modal
+cssprobe-cli findings .modal
+```
+
+cssprobe-cli also ships a skill (`cssprobe-cli skill-install`) so an agent can answer runtime CSS questions from the terminal. See [npm](https://www.npmjs.com/package/cssprobe-cli) / [GitHub](https://github.com/mack-peng/cssprobe-cli).
+
 ## 5. Auto-sync
 
 After initialization, the MCP server watches your project using native OS file events (FSEvents on macOS, inotify on Linux, ReadDirectoryChangesW on Windows). File changes are debounced (2-second quiet window by default) and incrementally synced — **the index stays current as you code.**
