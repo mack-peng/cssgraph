@@ -184,7 +184,7 @@ cssprobe-cli inspect .modal
 cssprobe-cli findings .modal
 ```
 
-cssprobe-cli also ships a skill (`cssprobe-cli skill-install`) so an agent can answer runtime CSS questions from the terminal. See [npm](https://www.npmjs.com/package/cssprobe-cli) / [GitHub](https://github.com/mack-peng/cssprobe-cli).
+See [npm](https://www.npmjs.com/package/cssprobe-cli) / [GitHub](https://github.com/mack-peng/cssprobe-cli).
 
 ## 5. Auto-sync
 
