@@ -8,6 +8,9 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22.5.0-brightgreen.svg)](https://nodejs.org/)
+[![npm version](https://img.shields.io/npm/v/cssgraph.svg)](https://www.npmjs.com/package/cssgraph)
+[![npm downloads](https://img.shields.io/npm/dm/cssgraph.svg)](https://www.npmjs.com/package/cssgraph)
+[![GitHub stars](https://img.shields.io/github/stars/mack-peng/cssgraph?style=social)](https://github.com/mack-peng/cssgraph/stargazers)
 
 [![macOS](https://img.shields.io/badge/macOS-supported-blue.svg)](#supported-platforms)
 [![Linux](https://img.shields.io/badge/Linux-supported-blue.svg)](#supported-platforms)
@@ -273,6 +276,12 @@ Built-in default excludes (always applied): `**/*.test.*`, `**/*.stories.*`, `**
 | macOS | x64, arm64 | npm |
 | Linux | x64, arm64 | npm |
 | Windows | x64, arm64 | npm |
+
+---
+
+## If cssgraph is useful
+
+A ⭐ star helps other developers discover it — and tells us to keep shipping.
 
 ---
 

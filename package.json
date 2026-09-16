@@ -1,6 +1,7 @@
 {
   "name": "cssgraph",
-  "version": "0.6.2",
+  "version": "0.6.3",
+  "mcpName": "io.github.mack-peng/cssgraph",
   "description": "CSS intelligence for AI coding agents — surgical style context, fewer tool calls, faster answers. 100% local.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -10,7 +11,9 @@
   "files": [
     "dist",
     "scripts",
-    "README.md"
+    "README.md",
+    "CHANGELOG.md",
+    "llms.txt"
   ],
   "scripts": {
     "build": "tsc && npm run copy-assets && node -e \"require('fs').chmodSync('dist/bin/cssgraph.js', 0o755)\"",

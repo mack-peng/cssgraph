@@ -1,0 +1,13 @@
+# cssgraph
+
+> CSS knowledge graph for AI coding agents — one tool call returns properties, overrides, specificity, callers and impact for any className. 100% local, MCP server with 13 tools.
+
+## Documentation
+
+- [README](https://raw.githubusercontent.com/mack-peng/cssgraph/main/README.md): overview, quick start, supported languages
+- [Installation guide](https://raw.githubusercontent.com/mack-peng/cssgraph/main/docs/guide/installation.md): agent-friendly install and MCP wiring (Claude Code, Cursor, Codex, opencode, …)
+- [npm package](https://www.npmjs.com/package/cssgraph): `npm i -g cssgraph`
+
+## Optional
+
+- [GitHub repository](https://github.com/mack-peng/cssgraph): source code, issues, releases
